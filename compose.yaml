@@ -1,0 +1,38 @@
+name: milo
+services:
+  milo:
+    build:
+      context: .
+      target: runtime
+    environment:
+      MILO_PUBLIC_URL: "${MILO_PUBLIC_URL:-http://localhost:8080}"
+      MILO_ALLOW_INSECURE_HTTP: "${MILO_ALLOW_INSECURE_HTTP:-false}"
+    ports:
+      - "${MILO_BIND_ADDRESS:-127.0.0.1}:${MILO_PORT:-8080}:8080"
+    volumes:
+      - milo-data:/data
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+  preview:
+    profiles: [preview]
+    build:
+      context: .
+      target: preview
+    ports:
+      - "127.0.0.1:${MILO_PREVIEW_PORT:-8081}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  milo-data:

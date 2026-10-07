@@ -1,6 +1,6 @@
 # Milo / JobOps feature coverage
 
-Reviewed 8 October 2026 against upstream main and all 11 open pull requests. This is an implementation checklist, not a claim of production parity. Milo is currently a portable browser prototype with fictional data and session-only edits. See **More → Career toolkit → Feature coverage** for the visible status map.
+Reviewed 8 October 2026 against upstream main and all 11 open pull requests. This is an implementation checklist, not a claim of production parity. Milo now has a separate live foundation with accounts, private persistence, applications, CV files/text, preferences and cover letters. The upstream comparison below tracks the original portable browser prototype and the remaining integration scope; see the README for current live status. See **More → Career toolkit → Feature coverage** for the visible status map.
 
 ## Implemented portable workflows
 
