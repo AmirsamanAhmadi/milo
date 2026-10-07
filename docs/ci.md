@@ -40,3 +40,11 @@ npx --yes skillfish add karanmrn/karanagentskills ai-prompt-engineering-safety-r
 ```
 
 Local `.git` metadata remains read-only in the editing environment. The application changes are committed remotely on the PR branch, but this workspace's index has not been reconciled. Reconcile it in a normal terminal after reviewing the remote branch; preserve `.DS_Store` and any independent local changes rather than resetting them.
+
+## Confirmed Snyk authentication failure
+
+The supplied Actions log reports `SNYK-0005` / `401 Unauthorized` at `snyk code test --sarif`. In the original remote workflow, `SNYK_TOKEN` is scoped to the Snyk setup step and is not passed to the scan step. The prepared workflow moves `SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}` to the job environment so every scan receives it.
+
+Configure or replace the `SNYK_TOKEN` repository Actions secret with a valid token from a provisioned Snyk account. Do not substitute a GitHub token. If the configured token is invalid, revoked or lacks the required Snyk account access, the corrected workflow should still fail with an authentication error; the environment change cannot repair account credentials. Missing tokens are explicitly reported as a scan that was not run, rather than a successful security scan.
+
+Publish the prepared workflow patch, then run Snyk Security again on the updated branch. See [Snyk authentication error documentation](https://docs.snyk.io/scan-with-snyk/error-catalog#snyk-0005). The workflow update is still blocked by GitHub write access in the editing environment.
