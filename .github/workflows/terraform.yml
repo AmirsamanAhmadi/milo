@@ -1,0 +1,41 @@
+name: Terraform validation
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['**/*.tf', '**/*.tfvars', '.github/workflows/terraform.yml']
+  pull_request:
+    paths: ['**/*.tf', '**/*.tfvars', '.github/workflows/terraform.yml']
+permissions:
+  contents: read
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect root Terraform configuration
+        id: configuration
+        shell: bash
+        run: |
+          if find . -name '*.tf' -not -path '*/.terraform/*' -not -path './.git/*' -print -quit | grep -q .; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo 'No Terraform configuration. Infrastructure validation is not applicable.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.configuration.outputs.present == 'true'
+        with:
+          terraform_version: '1.9.8'
+      - name: Format check
+        if: steps.configuration.outputs.present == 'true'
+        run: terraform fmt -check -recursive
+      - name: Validate each configuration directory
+        if: steps.configuration.outputs.present == 'true'
+        shell: bash
+        run: |
+          while IFS= read -r directory; do
+            terraform -chdir="$directory" init -backend=false -input=false
+            terraform -chdir="$directory" validate
+          done < <(find . -name '*.tf' -not -path '*/.terraform/*' -not -path './.git/*' -printf '%h\n' | sort -u)

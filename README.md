@@ -1,51 +1,67 @@
 # Milo
 
-Milo is a personal career workspace for tracking job applications, reviewing email evidence, preparing CVs and cover letters, finding relevant roles, and studying for interviews. The intended application is invite-only and Docker-hosted on your own server, with private user accounts and administrator-only membership management.
+Milo is an invite-only, self-hosted career workspace. It keeps application records, private CVs, role preferences and custom cover letters together, with a responsive light/dark interface.
 
-**Current state:** a working browser prototype with fictional data and session-only edits. Real authentication, persistent storage, live mailbox synchronization, job extraction and AI services are not implemented.
+## Run the live app
+
+Requires Docker and Docker Compose only:
+
+```sh
+docker compose up --build -d
+docker compose exec milo node scripts/setup-admin.cjs
+```
+
+Create your first administrator interactively, then open http://localhost:8080 and sign in. There are no default credentials or public registration. Administrators create member invitation links through **Invitations**; links expire after 72 hours and can be accepted only once.
+
+Records survive container restarts in the `milo-data` named volume. See [Container setup](docs/containers.md) for server origins, ports, backups and the optional preview.
+
+## Implemented live features
+
+- Real invite-only accounts, password hashing, database-backed sessions and logout.
+- Administrator-only member listing and invitation creation/revocation.
+- Private application records: role, company, location, work arrangement, employment type, annual NZD salary, source URL, description, notes, dates and stage history.
+- Application search/stage filters and a dashboard with pipeline/offer/follow-up counts.
+- Saved role preferences, applied to saved openings; no live job discovery yet.
+- Private PDF/DOCX/TXT uploads, authorized downloads/removal and reviewed CV text. TXT can fill the editor; PDF/Word extraction remains pending.
+- Job-specific custom cover-letter template builder, editing, persistent saving and TXT download.
+- Personal name editing, responsive layouts and light/dark mode.
+
+Each user's records and documents are protected by server-side ownership checks, including from administrators. The live app starts empty; it does not load fictional prototype records.
+
+## Still being built
+
+Gmail/Outlook/Live sync, job-board extraction, AI assessments/writing, resume rendering, interview study recommendations, watchlist refresh and advanced analytics remain planned. The design preview demonstrates those workflows with fictional data. Password recovery, changing passwords, member suspension, scheduled backups, restore tooling, passkeys and SSO are not implemented yet.
+
+## Design preview
+
+```sh
+docker compose --profile preview up --build -d
+```
+
+Open http://localhost:8081. You can also open `index.html` directly. Preview edits are session-only and do not affect live data. Preview persona controls are design-review controls; the live app uses actual sessions and server permissions.
 
 ## Documentation
 
-- [Product overview](docs/product.md): what Milo is, user journeys, features and current limits.
-- [Build plan](docs/build-plan.md): proposed architecture, delivery phases and the first production implementation slice.
-- [JobOps feature coverage](docs/feature-parity.md): upstream scope and implementation gaps.
-- [Reviewed pull requests](docs/upstream-pull-requests.json): upstream PR links and status snapshot.
-- [Design notes](docs/design.md): visual direction and prototype behavior.
+- [Product overview](docs/product.md): purpose, features and current scope.
+- [Build plan](docs/build-plan.md): architecture, phases and delivery status.
+- [Container setup](docs/containers.md): startup, administration and storage.
+- [JobOps feature coverage](docs/feature-parity.md): broader parity backlog.
+- [Reviewed pull requests](docs/upstream-pull-requests.json): upstream PR snapshot.
 
-## Open the prototype
+## Development and tests
 
-Open `index.html` directly in a web browser. It contains the complete preview and needs no server. Alternatively, with Python 3 installed:
-
-```sh
-python3 -m http.server 8080 --bind 127.0.0.1
-```
-
-Then visit http://localhost:8080. Standalone screen previews are in `preview/`; opening a separate file starts a fresh session.
-
-## Try the workflows
-
-- **Applications:** search, filter, switch list/board views and edit individual records.
-- **Email inbox:** review sample Gmail/Outlook evidence or paste email text; confirm/ignore associations without overwriting a manually selected stage.
-- **CV studio:** attach PDF, DOCX or TXT up to 10 MB. TXT imports directly; paste PDF/Word text for now.
-- **Opportunities → Role preferences:** filter title, location, workplace, employment type, annual NZD salary and excluded companies.
-- **Writing:** choose a job, add verified evidence and motivation, build/edit a custom template letter and download TXT.
-- **More → Career toolkit:** plan searches, capture jobs manually, maintain watchlists and inspect analytics/feature coverage.
-- **Interview prep:** explore sample role-specific topics, exercises and linked learning resources.
-- **Login preview:** switch member/admin personas to review visibility; these controls do not authenticate users.
-
-CVs, letters, preferences and manual changes reset on refresh. Only theme preference persists locally. No uploaded content is sent anywhere. Current uploads are not scored; template letters are not AI-generated. Static administrator screens are fictional design artifacts, not secured resources.
-
-## Development
-
-Requires Node.js for generation and regression checks; no package dependencies are installed.
+All checks run in the Docker build:
 
 ```sh
-node scripts/build-preview.cjs
-node tests/prototype.test.cjs
+docker build --target build -t milo-checks .
 ```
 
-Source is in `src/app.js`, `src/features.js`, `src/career.js` and `src/styles.css`. `scripts/load-source.cjs` assembles the scripts, and the builder generates 30 self-contained screens. Automated tests use a simulated DOM; browser/layout QA is still required. Preserve the existing `AGENTS.md`.
+For local checks, Node.js 24 or newer is required; there are no package dependencies to install:
 
-## Next milestone
+```sh
+npm test
+```
 
-Build the production foundation: Docker development services, database migrations, secure invite-only accounts and a saved application workflow. The acceptance gate is two users with isolated records, admin-only invitations, and data that survives restart. See the [first implementation slice](docs/build-plan.md#first-implementation-slice).
+`src/server/` contains persistence, account/workspace services and HTTP endpoints. `src/live/` contains the live interface. The original prototype stays in `src/app.js`, `src/features.js`, `src/career.js` and `src/styles.css`; its generator is `scripts/build-preview.cjs`.
+
+Tests check invitations, authentication, ownership isolation, persistent storage, uploads, letters, origin checks, throttling, HTTP responses and the interface's application-save flow. Full browser QA and actual Docker startup verification remain outstanding. Preserve `AGENTS.md`.

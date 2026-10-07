@@ -1,0 +1,53 @@
+name: Milo CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: milo-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build and test the screen preview
+        run: |
+          node scripts/build-preview.cjs
+          node tests/prototype.test.cjs
+      - name: Test the live backend when present
+        run: |
+          if [ -f tests/server.test.cjs ]; then
+            node --test tests/server.test.cjs
+          else
+            echo 'Live backend is not present on this branch yet.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Validate and smoke-test Docker when present
+        run: |
+          if [ ! -f Dockerfile ]; then
+            echo 'Docker application is not present on this branch yet.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          docker compose config --quiet
+          docker compose up --build -d milo
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8080/health; then
+              curl --fail --silent http://localhost:8080/ > /tmp/milo-home.html
+              grep -q 'Milo' /tmp/milo-home.html
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs --tail=100 milo
+          exit 1
+      - name: Stop test containers
+        if: always()
+        run: |
+          if [ -f compose.yaml ]; then docker compose down; fi

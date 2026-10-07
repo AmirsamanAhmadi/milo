@@ -1,0 +1,12 @@
+{
+  "name": "milo-career-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Invite-only self-hosted career workspace",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node src/server/main.cjs",
+    "build:preview": "node scripts/build-preview.cjs",
+    "test": "node scripts/build-preview.cjs && node tests/prototype.test.cjs && node --test tests/server.test.cjs"
+  }
+}

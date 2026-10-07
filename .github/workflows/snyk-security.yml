@@ -1,0 +1,60 @@
+name: Snyk Security
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  snyk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Snyk configuration
+        id: configuration
+        shell: bash
+        run: |
+          if [ -n "$SNYK_TOKEN" ]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            echo 'Snyk was not run: configure the SNYK_TOKEN repository secret. Fork PRs do not receive it.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: snyk/actions/setup@806182742461562b67788a64410098c9d9b96adb
+        if: steps.configuration.outputs.enabled == 'true'
+      - name: Scan code
+        if: steps.configuration.outputs.enabled == 'true'
+        run: snyk code test
+      - name: Scan dependencies when present
+        if: steps.configuration.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          if [ -f package-lock.json ] || [ -f yarn.lock ] || [ -f pnpm-lock.yaml ]; then
+            snyk test --all-projects
+          else
+            echo 'No supported dependency lockfile; dependency scan not applicable.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Scan infrastructure when present
+        if: steps.configuration.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          if find . -name '*.tf' -not -path './.git/*' -print -quit | grep -q .; then
+            snyk iac test
+          else
+            echo 'No Terraform configuration; IaC scan not applicable.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Scan application container when present
+        if: steps.configuration.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          if [ -f Dockerfile ]; then
+            docker build --target runtime -t milo:security .
+            snyk container test milo:security --file=Dockerfile
+          else
+            echo 'No Dockerfile; container scan not applicable.' >> "$GITHUB_STEP_SUMMARY"
+          fi
