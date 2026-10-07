@@ -4,13 +4,19 @@
 
 Turn the dependency-free screen prototype into a secure, invite-only application hosted through Docker on your own server. Keep the reviewed Milo interface and expand toward the JobOps coverage backlog.
 
-Current baseline: 30 generated screens, in-memory manual workflows, fictional records, and Node-based regression checks. There are no deployed services or real accounts. This document proposes the production stack; no production dependencies or infrastructure have been installed.
+Current baseline: a live Node service with persistent SQLite storage, real invite-only accounts, sessions, admin invitations, private applications and stage events, CV documents/text, preferences and cover letters. The original 30-screen prototype remains a separate design reference. Service tests cover isolated users, token expiry/reuse, origin checks, uploads and persistence; the browser script is exercised against the service through a simulated DOM. Real Docker startup and browser validation remain outstanding.
 
-## Proposed architecture
+## Foundation implementation decision
+
+The first slice uses dependency-free Node.js and SQLite rather than the initially proposed Next.js/PostgreSQL stack. This provides runnable persistence and tests within the current environment and one container, without scaffolding unused services. Node 24's built-in SQLite API remains experimental; pin the reviewed runtime for deployment. Revisit PostgreSQL and the worker architecture when background workloads and scale justify them. The stack below is the longer-term direction, not a list of installed dependencies.
+
+The first usable foundation is implemented. Next: verify container startup and browser flows on the Docker host, add password change/recovery and account administration, then implement robust document parsing and Gmail/Outlook connections. No email or search integration is enabled yet.
+
+## Longer-term architecture
 
 Use TypeScript with Next.js for the web application and server API, PostgreSQL for persistent data, and a separate worker process for document parsing, mailbox synchronization, search extraction and AI tasks. Use a PostgreSQL-backed job queue initially so the first deployment does not require Redis. Store private documents in a mounted volume behind authorized download endpoints; add S3-compatible storage only if deployment needs it.
 
-Run web, worker and database through Docker Compose. Put HTTPS termination in front of the web service, keep the database private, and mount persistent database/document volumes. Pin supported dependency and image versions during implementation rather than guessing versions in this plan. Next.js supports self-hosted Node and Docker deployment: [official self-hosting guide](https://nextjs.org/docs/app/guides/self-hosting), [Docker guide](https://docs.docker.com/guides/nextjs/).
+Run every Milo service through Docker Compose: web/API, worker, PostgreSQL, HTTPS ingress and backup jobs. Build tools, tests, migrations and administrator bootstrap commands also run in containers; the host requires only Docker/Compose. See [Container setup](containers.md) for the runnable preview configuration. Put HTTPS termination in front of the web service, keep the database private, and mount persistent database/document volumes. Pin supported dependency and image versions during implementation rather than guessing versions in this plan. Next.js supports self-hosted Node and Docker deployment: [official self-hosting guide](https://nextjs.org/docs/app/guides/self-hosting), [Docker guide](https://docs.docker.com/guides/nextjs/).
 
 Use an established authentication implementation with database sessions and server-side authorization. Passwords, password recovery and invitation acceptance precede optional passkeys/SSO. Choose and verify the auth package during Phase 1. User preferences and secret connector settings are separate resources.
 
@@ -46,7 +52,7 @@ Every private record carries workspace ownership. Enforce ownership in API queri
 
 Phases are dependency ordered, not calendar promises. Complete a small usable release after Phase 3; add mailbox history next. Production deployment to the user's server needs its hosting details and a reviewed configuration at release time.
 
-## First implementation slice
+## First implementation slice — implemented, deployment QA pending
 
 1. Scaffold the production app alongside the preserved prototype; retain `index.html` as a design reference.
 2. Add a runtime/package manifest, repeatable scripts, an environment example with placeholders and development Compose configuration.
@@ -56,7 +62,7 @@ Phases are dependency ordered, not calendar promises. Complete a small usable re
 6. Add database-backed tests for tenant isolation, admin permissions, invitation expiry/reuse and stage updates; run browser tests for the vertical flow.
 7. Document exact startup, migration, backup and test commands once they exist.
 
-Completion of this slice establishes a real app; additional screen migration follows without blocking on OAuth or AI credentials.
+The delivered slice also persists CV files/text, preferences and cover letters. The runtime uses SQLite instead of PostgreSQL for now. Bootstrap, backups and tests run inside Docker; secure accounts are enforced by the server. Container/browser QA remains the next acceptance gate.
 
 ## Integration rules and constraints
 

@@ -6,6 +6,12 @@ Milo is a personal career workspace that helps people find suitable jobs, rememb
 
 The intended product is invite-only and self-hosted on your server through Docker. Each user has a private workspace. Administrators manage invitations and membership; ordinary members manage their own job search. The interface supports light and dark mode and adapts to mobile screens. An installable mobile web app is planned before considering a native app.
 
+## Live release status
+
+The first live foundation now implements real invite-only accounts, administrator-created/revoked invitation links, secure cookie sessions, private applications and stage history, saved preferences, private CV files and reviewed text, and persistent per-job cover letters. The live service uses SQLite in a Docker volume and starts empty. It does not use the preview's persona controls or fictional records. Administrators can manage membership invitations without reading other users' private content.
+
+Live features save to the server. Light/dark preference stays in the browser. Mailbox sync, external job search, PDF/Word parsing, AI matching/writing and personalized learning recommendations remain planned. The feature table below describes the original prototype alongside the remaining product scope; see [README](../README.md) for the current live feature list.
+
 ## The problem it solves
 
 Applying across LinkedIn, SEEK and company sites leaves scattered records and email threads. People can forget previous applications, miss follow-ups, reuse unsuitable letters, and struggle to decide what to study before interviews. Milo connects those steps while showing the evidence behind its recommendations.
@@ -20,7 +26,7 @@ Applying across LinkedIn, SEEK and company sites leaves scattered records and em
 6. Review CV gaps, prepare a truthful cover letter, and record the application.
 7. Track replies and follow-ups; prepare with role-specific topics, resources and practice questions.
 
-Steps involving real accounts, synchronization and discovery are planned production behavior, not implemented services in the current prototype.
+Real accounts and private saved data are implemented in the live app. Synchronization and connected discovery remain planned.
 
 ## Feature inventory
 
@@ -40,7 +46,7 @@ Steps involving real accounts, synchronization and discovery are planned product
 | Accounts | Account forms, member/admin preview personas and admin route visibility | Secure sessions, invitations, tenant isolation, audited administration and recovery |
 | Appearance | Responsive layout, light/dark mode and saved theme preference | Installable mobile experience and accessibility/browser validation |
 
-Prototype changes stay in memory until refresh or navigation to another standalone screen. Only the theme preference persists locally. There is no real login, live mailbox connection, automatic submission, AI assessment or production backend.
+The original design preview remains separate from the live app. Prototype changes stay in memory until refresh or navigation to another standalone screen. Only the theme preference persists locally. There is no real login, live mailbox connection, automatic submission, AI assessment or production backend.
 
 ## Matching and screening scores
 

@@ -1,0 +1,53 @@
+name: CI/CD report
+on:
+  workflow_run:
+    workflows: [Milo CI, Snyk Security, Terraform validation]
+    types: [requested, in_progress, completed]
+permissions:
+  actions: read
+  checks: write
+  contents: read
+concurrency:
+  group: report-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      # Never check out or execute code from the triggering branch here.
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner,repo}=context.repo;
+            const sha=context.payload.workflow_run.head_sha;
+            const expected=['Milo CI','Snyk Security','Terraform validation'];
+            const runs=await github.paginate(github.rest.actions.listWorkflowRunsForRepo,
+              {owner,repo,head_sha:sha,per_page:100});
+            const selected=expected.map(name=>runs.filter(r=>r.name===name)
+              .sort((a,b)=>b.id-a.id)[0]);
+            let failed=false, pending=false;
+            const rows=expected.map((name,index)=>{
+              const run=selected[index];
+              if(!run || run.status!=='completed') pending=true;
+              else if(run.conclusion!=='success') failed=true;
+              const result=run?.conclusion || run?.status || 'waiting for workflow';
+              return `| ${run ? `[${name}](${run.html_url})` : name} | ${result} |`;
+            });
+            const summary=[`Commit: ${sha}`, '', '| Workflow | Result |',
+              '| --- | --- |', ...rows, '',
+              'Milo CI includes preview, backend and Docker smoke tests.',
+              'Terraform reports success when no configuration exists; its validation steps are then not applicable.',
+              'Snyk logs identify unavailable credentials and non-applicable inputs. A successful workflow alone does not certify skipped scans.',
+              'Issue summaries run only for opened issues. No deployment workflow is configured.'
+            ].join('\n');
+            await core.summary.addRaw(summary).write();
+            const checks=await github.paginate(github.rest.checks.listForRef,
+              {owner,repo,ref:sha,check_name:'CI/CD report',per_page:100});
+            const previous=checks.find(c=>c.name==='CI/CD report' && c.app?.slug==='github-actions');
+            const params={owner,repo,name:'CI/CD report',
+              details_url:`https://github.com/${owner}/${repo}/actions/runs/${context.runId}`,
+              output:{title:failed?'CI/CD failed':pending?'CI/CD running':'CI/CD passed',summary},
+              status:pending?'in_progress':'completed'};
+            if(!pending) params.conclusion=failed?'failure':'success';
+            if(previous) await github.rest.checks.update({...params,check_run_id:previous.id});
+            else await github.rest.checks.create({...params,head_sha:sha});

@@ -1,0 +1,10 @@
+**
+!Dockerfile
+!src/
+!src/**
+!scripts/
+!scripts/**
+!tests/
+!tests/**
+!docker/
+!docker/nginx.conf
