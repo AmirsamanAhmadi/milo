@@ -1,0 +1,83 @@
+{
+  "reviewedOn": "2026-10-08",
+  "repository": "https://github.com/DaKheera47/job-ops",
+  "openPullRequests": [
+    {
+      "number": 362,
+      "title": "feat: add URL-based manual ingestion endpoint and capture docs",
+      "state": "open",
+      "draft": false,
+      "url": "https://github.com/DaKheera47/job-ops/pull/362"
+    },
+    {
+      "number": 513,
+      "title": "Feat/extractor upwork [New]",
+      "state": "open",
+      "draft": false,
+      "url": "https://github.com/DaKheera47/job-ops/pull/513"
+    },
+    {
+      "number": 547,
+      "title": "add o365 mailbox support",
+      "state": "open",
+      "draft": false,
+      "url": "https://github.com/DaKheera47/job-ops/pull/547"
+    },
+    {
+      "number": 549,
+      "title": "feat: add sidebar-cv Typst theme with typography/color settings",
+      "state": "open",
+      "draft": false,
+      "url": "https://github.com/DaKheera47/job-ops/pull/549"
+    },
+    {
+      "number": 552,
+      "title": "feat: Add Codex resume file import support",
+      "state": "open",
+      "draft": false,
+      "url": "https://github.com/DaKheera47/job-ops/pull/552"
+    },
+    {
+      "number": 641,
+      "title": "Add Anthropic fallback for resume imports",
+      "state": "open",
+      "draft": true,
+      "url": "https://github.com/DaKheera47/job-ops/pull/641"
+    },
+    {
+      "number": 749,
+      "title": "feat: passkeys (webauthn)",
+      "state": "open",
+      "draft": false,
+      "url": "https://github.com/DaKheera47/job-ops/pull/749"
+    },
+    {
+      "number": 761,
+      "title": "feat(tracking): implement IMAP post-application provider",
+      "state": "open",
+      "draft": false,
+      "url": "https://github.com/DaKheera47/job-ops/pull/761"
+    },
+    {
+      "number": 765,
+      "title": "Add Cheaper Inference LLM provider",
+      "state": "open",
+      "draft": false,
+      "url": "https://github.com/DaKheera47/job-ops/pull/765"
+    },
+    {
+      "number": 767,
+      "title": "feat(orchestrator): sso login + account linking",
+      "state": "open",
+      "draft": false,
+      "url": "https://github.com/DaKheera47/job-ops/pull/767"
+    },
+    {
+      "number": 766,
+      "title": "feat: add LiteLLM proxy as an LLM provider",
+      "state": "open",
+      "draft": false,
+      "url": "https://github.com/DaKheera47/job-ops/pull/766"
+    }
+  ]
+}
