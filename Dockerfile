@@ -21,12 +21,12 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 FROM node:24-alpine AS runtime
 ENV NODE_ENV=production PORT=8080 MILO_DATA_DIR=/data
 WORKDIR /app
-RUN mkdir -p /data && chown node:node /data && chmod 700 /data
+RUN apk upgrade --no-cache && mkdir -p /data && chown node:node /data && chmod 700 /data
 COPY --from=build /app/src/server/ ./src/server/
 COPY --from=build /app/src/live/ ./src/live/
 COPY --from=build /app/scripts/bootstrap-admin.cjs /app/scripts/setup-admin.cjs /app/scripts/backup.cjs ./scripts/
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "require('node:https').get('https://localhost:8080/health',{ca:require('node:fs').readFileSync('/certs/cert.pem')},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 CMD ["node", "src/server/main.cjs"]

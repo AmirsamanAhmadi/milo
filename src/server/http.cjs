@@ -7,6 +7,8 @@ const assets = {
   '/styles.css': ['styles.css','text/css; charset=utf-8'],
 };
 function handler(service,{assetsDir=path.resolve(__dirname,'../live')}={}) {
+  const cachedAssets = Object.fromEntries(Object.entries(assets).map(([url,[file,type]]) =>
+    [url,{type,content:fs.readFileSync(path.join(assetsDir,file))}]));
   return async (req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('Referrer-Policy','no-referrer');
@@ -16,8 +18,7 @@ function handler(service,{assetsDir=path.resolve(__dirname,'../live')}={}) {
       const url=new URL(req.url,'http://localhost');
       if(url.pathname==='/health'&&req.method==='GET'){res.setHeader('Content-Type','text/plain');res.end('ok');return;}
       if(req.method==='GET'&&assets[url.pathname]) {
-        const [file,type]=assets[url.pathname];
-        const content=fs.readFileSync(path.join(assetsDir,file));res.setHeader('Content-Type',type);res.end(content);return;
+        const {type,content}=cachedAssets[url.pathname];res.setHeader('Content-Type',type);res.end(content);return;
       }
       if(!url.pathname.startsWith('/api/')){res.statusCode=404;res.end('Not found');return;}
       let body={};

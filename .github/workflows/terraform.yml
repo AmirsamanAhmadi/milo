@@ -2,10 +2,7 @@ name: Terraform validation
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths: ['**/*.tf', '**/*.tfvars', '.github/workflows/terraform.yml']
   pull_request:
-    paths: ['**/*.tf', '**/*.tfvars', '.github/workflows/terraform.yml']
 permissions:
   contents: read
 jobs:

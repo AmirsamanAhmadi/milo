@@ -1,9 +1,7 @@
 name: Snyk Security
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,14 +22,15 @@ jobs:
           else
             echo 'enabled=false' >> "$GITHUB_OUTPUT"
             echo 'Snyk was not run: configure the SNYK_TOKEN repository secret. Fork PRs do not receive it.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
       - uses: snyk/actions/setup@806182742461562b67788a64410098c9d9b96adb
-        if: steps.configuration.outputs.enabled == 'true'
+        if: ${{ !cancelled() && steps.configuration.outputs.enabled == 'true' }}
       - name: Scan code
-        if: steps.configuration.outputs.enabled == 'true'
+        if: ${{ !cancelled() && steps.configuration.outputs.enabled == 'true' }}
         run: snyk code test
       - name: Scan dependencies when present
-        if: steps.configuration.outputs.enabled == 'true'
+        if: ${{ !cancelled() && steps.configuration.outputs.enabled == 'true' }}
         shell: bash
         run: |
           if [ -f package-lock.json ] || [ -f yarn.lock ] || [ -f pnpm-lock.yaml ]; then
@@ -40,7 +39,7 @@ jobs:
             echo 'No supported dependency lockfile; dependency scan not applicable.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Scan infrastructure when present
-        if: steps.configuration.outputs.enabled == 'true'
+        if: ${{ !cancelled() && steps.configuration.outputs.enabled == 'true' }}
         shell: bash
         run: |
           if find . -name '*.tf' -not -path './.git/*' -print -quit | grep -q .; then
@@ -49,7 +48,7 @@ jobs:
             echo 'No Terraform configuration; IaC scan not applicable.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Scan application container when present
-        if: steps.configuration.outputs.enabled == 'true'
+        if: ${{ !cancelled() && steps.configuration.outputs.enabled == 'true' }}
         shell: bash
         run: |
           if [ -f Dockerfile ]; then

@@ -1,3 +1,6 @@
+const {randomBytes}=require('node:crypto');
+const adminPassword=randomBytes(24).toString('hex');
+const memberPassword=()=>randomBytes(24).toString('hex');
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
@@ -11,10 +14,10 @@ const origin='http://localhost:8080';
 const app={role:'Delivery Lead',company:'Example',location:'Auckland',workplace:'Hybrid',employment_type:'Permanent',source:'SEEK',url:'https://example.com/job',salary:130000,stage:'Applied',applied_at:'2026-10-08',follow_up:'',description:'Verified requirements',notes:'Private notes'};
 async function fixture(filename=':memory:') {
  const db=openStore(filename);let time=Date.now();const service=createService(db,{publicURL:origin,now:()=>time});
- await service.bootstrap({email:'admin@example.com',name:'Admin',password:'a strong initial secret'});
+ await service.bootstrap({email:'admin@example.com',name:'Admin',password:adminPassword});
  const call=(method,p,body={},cookie='',extra={})=>service.dispatch({method,path:p,body,cookie,requestOrigin:origin,...extra});
- const admin=await call('POST','/api/login',{email:'admin@example.com',password:'a strong initial secret'});
- async function member(email){const inv=await call('POST','/api/admin/invitations',{email},admin.cookie);const token=new URL(inv.body.url).hash.slice(8);const accepted=await call('POST','/api/invitations/accept',{token,name:email,password:'a strong member secret'});assert.equal(accepted.status,201);return {cookie:accepted.cookie,token};}
+ const admin=await call('POST','/api/login',{email:'admin@example.com',password:adminPassword});
+ async function member(email){const inv=await call('POST','/api/admin/invitations',{email},admin.cookie);const token=new URL(inv.body.url).hash.slice(8);const accepted=await call('POST','/api/invitations/accept',{token,name:email,password:memberPassword()});assert.equal(accepted.status,201);return {cookie:accepted.cookie,token};}
  return {db,service,call,admin,member,advance:ms=>{time+=ms;}};
 }
 test('invite-only accounts, admin permissions, single-use and expired invitations',async()=>{
@@ -22,18 +25,18 @@ test('invite-only accounts, admin permissions, single-use and expired invitation
  assert.equal((await f.call('GET','/api/applications')).status,401);
  assert.equal((await f.call('POST','/api/register',{email:'public@example.com'},f.admin.cookie)).status,404);
  assert.match(f.admin.cookie,/HttpOnly; SameSite=Strict/);
- assert.equal((await f.call('POST','/api/login',{email:'admin@example.com',password:'wrong'})).status,401);
+ assert.equal((await f.call('POST','/api/login',{email:'admin@example.com',password:memberPassword()})).status,401);
  const m=await f.member('one@example.com');
  assert.equal((await f.call('GET','/api/admin/members',{},m.cookie)).status,403);
  assert.equal((await f.call('POST','/api/admin/invitations',{email:'x@example.com'},m.cookie)).status,403);
- assert.equal((await f.call('POST','/api/invitations/accept',{token:m.token,name:'Again',password:'long repeated secret'})).status,400);
+ assert.equal((await f.call('POST','/api/invitations/accept',{token:m.token,name:'Again',password:memberPassword()})).status,400);
  const invite=await f.call('POST','/api/admin/invitations',{email:'expired@example.com'},f.admin.cookie);
  f.advance(73*3600000);
- assert.equal((await f.call('POST','/api/invitations/accept',{token:new URL(invite.body.url).hash.slice(8),name:'Late',password:'a strong member secret'})).status,400);
+ assert.equal((await f.call('POST','/api/invitations/accept',{token:new URL(invite.body.url).hash.slice(8),name:'Late',password:memberPassword()})).status,400);
  assert.equal((await f.call('PUT','/api/me',{name:'Changed'},f.admin.cookie,{requestOrigin:'https://attacker.example'})).status,403);
  assert.equal((await f.call('POST','/api/logout',{},m.cookie)).status,200);
  assert.equal((await f.call('GET','/api/me',{},m.cookie)).status,401);
- await assert.rejects(f.service.bootstrap({email:'again@example.com',name:'Again',password:'a strong initial secret'}));
+ await assert.rejects(f.service.bootstrap({email:'again@example.com',name:'Again',password:adminPassword}));
  }finally{f.db.close();}
 });
 test('applications, history, letters, preferences and documents stay private and survive reopen',async()=>{
@@ -79,12 +82,12 @@ test('revocation, secure cookies, authentication throttling and date validation'
  const f=await fixture();try{
  const invite=await f.call('POST','/api/admin/invitations',{email:'revoked@example.com'},f.admin.cookie);
  assert.equal((await f.call('DELETE','/api/admin/invitations/'+invite.body.id,{},f.admin.cookie)).status,200);
- assert.equal((await f.call('POST','/api/invitations/accept',{token:new URL(invite.body.url).hash.slice(8),name:'Revoked',password:'a strong member secret'})).status,400);
+ assert.equal((await f.call('POST','/api/invitations/accept',{token:new URL(invite.body.url).hash.slice(8),name:'Revoked',password:memberPassword()})).status,400);
  assert.equal((await f.call('POST','/api/applications',{...app,applied_at:'2026-02-30'},f.admin.cookie)).status,400);
- for(let i=0;i<20;i++)assert.equal((await f.call('POST','/api/login',{email:'missing@example.com',password:'wrong'},'',{ip:'limited'})).status,401);
- assert.equal((await f.call('POST','/api/login',{email:'missing@example.com',password:'wrong'},'',{ip:'limited'})).status,429);
+ for(let i=0;i<20;i++)assert.equal((await f.call('POST','/api/login',{email:'missing@example.com',password:memberPassword()},'',{ip:'limited'})).status,401);
+ assert.equal((await f.call('POST','/api/login',{email:'missing@example.com',password:memberPassword()},'',{ip:'limited'})).status,429);
  const secure=createService(f.db,{publicURL:'https://milo.example.com'});
- const login=await secure.dispatch({method:'POST',path:'/api/login',requestOrigin:'https://milo.example.com',body:{email:'admin@example.com',password:'a strong initial secret'}});
+ const login=await secure.dispatch({method:'POST',path:'/api/login',requestOrigin:'https://milo.example.com',body:{email:'admin@example.com',password:adminPassword}});
  assert.match(login.cookie,/; Secure$/);
  }finally{f.db.close();}
 });
@@ -103,4 +106,19 @@ test('live frontend saves applications through the real service and renders esca
  const member=await f.member('frontend-member@example.com');cookie=member.cookie;await run('loadSession()');await run("render('Today')");assert.ok(!element('#app').innerHTML.includes('data-route="Members"'));assert.ok(!element('#app').innerHTML.includes('data-route="Invitations"'));
  await run("render('Invitations')");assert.ok(element('#app').innerHTML.includes('Administrator access is required.'));
  }finally{f.db.close();}
+});
+
+test('static assets are cached before requests and do not read disk per request',async()=>{
+ const folder=fs.mkdtempSync(path.join(os.tmpdir(),'milo-assets-'));
+ try {
+  for(const file of ['index.html','app.js','styles.css'])fs.writeFileSync(path.join(folder,file),'cached '+file);
+  const serve=handler({dispatch(){throw Error('Static request reached service');}},{assetsDir:folder});
+  fs.rmSync(folder,{recursive:true,force:true});
+  for(const url of ['/','/app.js','/styles.css']) {
+   const req={method:'GET',url,headers:{}};
+   const res={setHeader(){},end(value){this.value=value}};
+   await serve(req,res);
+   assert.match(String(res.value),/^cached /);
+  }
+ }finally{fs.rmSync(folder,{recursive:true,force:true});}
 });

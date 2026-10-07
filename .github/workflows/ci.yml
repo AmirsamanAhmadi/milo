@@ -1,7 +1,6 @@
 name: Milo CI
 on:
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -35,11 +34,12 @@ jobs:
             echo 'Docker application is not present on this branch yet.' >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          bash scripts/create-local-tls.sh
           docker compose config --quiet
           docker compose up --build -d milo
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://localhost:8080/health; then
-              curl --fail --silent http://localhost:8080/ > /tmp/milo-home.html
+            if curl --cacert certs/cert.pem --fail --silent https://localhost:8080/health; then
+              curl --cacert certs/cert.pem --fail --silent https://localhost:8080/ > /tmp/milo-home.html
               grep -q 'Milo' /tmp/milo-home.html
               exit 0
             fi

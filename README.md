@@ -4,14 +4,15 @@ Milo is an invite-only, self-hosted career workspace. It keeps application recor
 
 ## Run the live app
 
-Requires Docker and Docker Compose only:
+Requires Docker, Docker Compose and OpenSSL for local TLS setup:
 
 ```sh
+bash scripts/create-local-tls.sh
 docker compose up --build -d
 docker compose exec milo node scripts/setup-admin.cjs
 ```
 
-Create your first administrator interactively, then open http://localhost:8080 and sign in. There are no default credentials or public registration. Administrators create member invitation links through **Invitations**; links expire after 72 hours and can be accepted only once.
+Create your first administrator interactively, then open https://localhost:8080 and sign in. There are no default credentials or public registration. Administrators create member invitation links through **Invitations**; links expire after 72 hours and can be accepted only once.
 
 Records survive container restarts in the `milo-data` named volume. See [Container setup](docs/containers.md) for server origins, ports, backups and the optional preview.
 
@@ -65,3 +66,5 @@ npm test
 `src/server/` contains persistence, account/workspace services and HTTP endpoints. `src/live/` contains the live interface. The original prototype stays in `src/app.js`, `src/features.js`, `src/career.js` and `src/styles.css`; its generator is `scripts/build-preview.cjs`.
 
 Tests check invitations, authentication, ownership isolation, persistent storage, uploads, letters, origin checks, throttling, HTTP responses and the interface's application-save flow. Full browser QA and actual Docker startup verification remain outstanding. Preserve `AGENTS.md`.
+
+Local TLS uses a disposable self-signed certificate valid for 30 days. Trust `certs/cert.pem` in your local browser before signing in. The generator preserves existing certificates. For production, use a trusted certificate and protect its private key with file permissions that allow only the operator and container user (UID 1000) to read it. Never commit TLS keys. Set `MILO_TLS_KEY` and `MILO_TLS_CERT` for direct Node execution.
