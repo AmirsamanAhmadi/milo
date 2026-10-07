@@ -21,7 +21,10 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 FROM node:24-alpine AS runtime
 ENV NODE_ENV=production PORT=8080 MILO_DATA_DIR=/data
 WORKDIR /app
-RUN apk upgrade --no-cache && mkdir -p /data && chown node:node /data && chmod 700 /data
+RUN apk upgrade --no-cache \
+    && rm -rf /usr/local/lib/node_modules /opt/yarn* \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg \
+    && mkdir -p /data && chown node:node /data && chmod 700 /data
 COPY --from=build /app/src/server/ ./src/server/
 COPY --from=build /app/src/live/ ./src/live/
 COPY --from=build /app/scripts/bootstrap-admin.cjs /app/scripts/setup-admin.cjs /app/scripts/backup.cjs ./scripts/

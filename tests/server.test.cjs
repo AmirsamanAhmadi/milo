@@ -122,3 +122,17 @@ test('static assets are cached before requests and do not read disk per request'
   }
  }finally{fs.rmSync(folder,{recursive:true,force:true});}
 });
+
+test('JSON responses and errors escape markup without changing parsed values',async()=>{
+ const {Problem}=require('../src/server/service.cjs');
+ const value='<script>alert(1)</script>&';
+ for(const fail of [false,true]) {
+  const serve=handler({async dispatch(){if(fail)throw new Problem(400,value);return {status:200,body:{value}};}});
+  const req={method:'GET',url:'/api/me',headers:{}};
+  const res={headers:{},setHeader(k,v){this.headers[k]=v},end(value){this.value=value}};
+  await serve(req,res);
+  assert.equal(res.headers['Content-Type'],'application/json; charset=utf-8');
+  assert.ok(!res.value.includes('<'));
+  assert.equal(JSON.parse(res.value)[fail?'error':'value'],value);
+ }
+});

@@ -2,7 +2,7 @@ name: CI/CD report
 on:
   workflow_run:
     workflows: [Milo CI, Snyk Security, Terraform validation]
-    types: [requested, in_progress, completed]
+    types: [completed]
 permissions:
   actions: read
   checks: write
