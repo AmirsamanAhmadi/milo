@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {Readable} = require('node:stream');
+const {pipeline} = require('node:stream/promises');
 // Preserve JSON values while preventing HTML interpretation of embedded markup.
 const json = value => JSON.stringify(value).replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/&/g,'\\u0026');
 const { Problem } = require('./service.cjs');
@@ -38,12 +39,13 @@ function handler(service,{assetsDir=path.resolve(__dirname,'../live')}={}) {
       if(result.binary) {
         res.setHeader('Content-Type','application/octet-stream');
         res.setHeader('Content-Disposition',`attachment; filename="milo-document"; filename*=UTF-8''${encodeURIComponent(result.name).replace(/'/g,'%27')}`);
-        Readable.from([Buffer.from(result.binary)]).pipe(res);
-      } else {res.setHeader('Content-Type','application/json; charset=utf-8');res.end(json(result.body));}
+        await pipeline(Readable.from([Buffer.from(result.binary)]),res);
+      } else {res.setHeader('Content-Type','application/json; charset=utf-8');await pipeline(Readable.from([json(result.body)]),res);}
     } catch(error) {
       res.statusCode=error instanceof Problem?error.status:500;
       res.setHeader('Content-Type','application/json; charset=utf-8');
-      res.end(json({error:error instanceof Problem?error.message:'The server could not complete this request.'}));
+      if(res.destroyed)return;
+      await pipeline(Readable.from([json({error:error instanceof Problem?error.message:'The server could not complete this request.'})]),res);
       // Deliberately omit request contents, cookies, tokens and private records from logs.
       if(!(error instanceof Problem))console.error('Milo request failed:',error.code||error.name);
     }

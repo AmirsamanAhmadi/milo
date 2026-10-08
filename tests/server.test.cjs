@@ -6,7 +6,11 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const {Readable}=require('node:stream');
+const {Readable,Writable}=require('node:stream');
+function response(){
+ const res=new Writable({write(chunk,encoding,done){this.value=(this.value||'')+chunk.toString();done();}});
+ res.headers={};res.statusCode=200;res.setHeader=function(k,v){this.headers[k]=v;};return res;
+}
 const {openStore}=require('../src/server/store.cjs');
 const {createService}=require('../src/server/service.cjs');
 const {handler}=require('../src/server/http.cjs');
@@ -68,7 +72,7 @@ test('applications, history, letters, preferences and documents stay private and
  const db=openStore(filename);try{const service=createService(db,{publicURL:origin});const result=await service.dispatch({method:'GET',path:'/api/applications/'+id,cookie});assert.equal(result.body.application.stage,'Interview');assert.equal(result.body.application.notes,'Private notes');const cv=await service.dispatch({method:'GET',path:'/api/cv',cookie});assert.equal(cv.body.text,'Private CV evidence');assert.equal(cv.body.documents.length,1);}finally{db.close();fs.rmSync(folder,{recursive:true,force:true});}
 });
 test('HTTP transport serves only live assets, rejects invalid requests, and returns private JSON',async()=>{
- const f=await fixture();try{const serve=handler(f.service);async function request(method,url,body,headers={}){const req=Readable.from(body===undefined?[]:[Buffer.from(body)]);Object.assign(req,{method,url,headers,socket:{remoteAddress:'test'}});const res={headers:{},statusCode:200,setHeader(k,v){this.headers[k]=v},end(value){this.value=value}};await serve(req,res);return res;}
+ const f=await fixture();try{const serve=handler(f.service);async function request(method,url,body,headers={}){const req=Readable.from(body===undefined?[]:[Buffer.from(body)]);Object.assign(req,{method,url,headers,socket:{remoteAddress:'test'}});const res=response();await serve(req,res);return res;}
  assert.equal((await request('GET','/src/server/service.cjs')).statusCode,404);
  assert.equal((await request('GET','/preview/members.html')).statusCode,404);
  assert.equal((await request('GET','/health')).value,'ok');
@@ -129,7 +133,7 @@ test('JSON responses and errors escape markup without changing parsed values',as
  for(const fail of [false,true]) {
   const serve=handler({async dispatch(){if(fail)throw new Problem(400,value);return {status:200,body:{value}};}});
   const req={method:'GET',url:'/api/me',headers:{}};
-  const res={headers:{},setHeader(k,v){this.headers[k]=v},end(value){this.value=value}};
+  const res=response();
   await serve(req,res);
   assert.equal(res.headers['Content-Type'],'application/json; charset=utf-8');
   assert.ok(!res.value.includes('<'));
