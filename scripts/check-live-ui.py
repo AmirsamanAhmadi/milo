@@ -17,10 +17,9 @@ def main():
     created = False
     try:
         run("run", "-d", "--name", name, "--network", "milo_default", "--read-only", "--tmpfs", "/tmp:size=64m",
-            "-e", "MILO_DATA_DIR=/tmp/milo-ui", "-e", "MILO_PUBLIC_URL=https://" + name + ":8080",
-            "--mount", "type=bind,source=" + str(root / "certs") + ",target=/certs,readonly", "milo-milo")
+            "-e", "MILO_DATA_DIR=/tmp/milo-ui", "-e", "MILO_PUBLIC_URL=http://" + name + ":8080", "milo-milo")
         created = True
-        run("run", "--rm", "--network", "milo_default", "-e", "MILO_UI_URL=https://" + name + ":8080",
+        run("run", "--rm", "--network", "milo_default", "-e", "MILO_UI_URL=http://" + name + ":8080",
             "-e", "MILO_UI_FIXTURE=1", "--mount", "type=bind,source=" + str(output) + ",target=/screenshots", "milo-ui-check")
     finally:
         if created:

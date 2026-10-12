@@ -5,6 +5,7 @@ RUN apk add --no-cache python3
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY tests/ ./tests/
+COPY docs/code-scan-exceptions.json ./docs/code-scan-exceptions.json
 RUN node scripts/build-preview.cjs \
     && node tests/prototype.test.cjs \
     && node --test tests/server.test.cjs \
@@ -40,5 +41,5 @@ COPY --from=build /app/scripts/backup.py ./scripts/
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('node:https').get('https://localhost:8080/health',{ca:require('node:fs').readFileSync('/certs/cert.pem')},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+  CMD node -e "const tls=Boolean(process.env.MILO_TLS_KEY);require(tls?'node:https':'node:http').get((tls?'https':'http')+'://localhost:8080/health',tls?{ca:require('node:fs').readFileSync(process.env.MILO_TLS_CERT)}:{},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 CMD ["node", "src/server/main.cjs"]

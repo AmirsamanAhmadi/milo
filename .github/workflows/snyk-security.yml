@@ -28,7 +28,14 @@ jobs:
         if: ${{ !cancelled() && steps.configuration.outputs.enabled == 'true' }}
       - name: Scan code
         if: ${{ !cancelled() && steps.configuration.outputs.enabled == 'true' }}
-        run: snyk code test --sarif-file-output=${{ runner.temp }}/snyk-code.sarif
+        shell: bash
+        run: |
+          set +e
+          snyk code test --sarif-file-output="${{ runner.temp }}/snyk-code.sarif"
+          scan_exit=$?
+          set -e
+          python scripts/check-code-findings.py "${{ runner.temp }}/snyk-code.sarif" --scan-exit "$scan_exit" | tee "${{ runner.temp }}/snyk-code-review.txt"
+          cat "${{ runner.temp }}/snyk-code-review.txt" >> "$GITHUB_STEP_SUMMARY"
       - name: Scan dependencies when present
         if: ${{ !cancelled() && steps.configuration.outputs.enabled == 'true' }}
         shell: bash
@@ -66,5 +73,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: snyk-code-findings
-          path: ${{ runner.temp }}/snyk-code.sarif
+          path: |
+            ${{ runner.temp }}/snyk-code.sarif
+            ${{ runner.temp }}/snyk-code-review.txt
           if-no-files-found: ignore

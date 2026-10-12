@@ -7,6 +7,8 @@
 !scripts/**
 !tests/
 !tests/**
+!docs/
+!docs/code-scan-exceptions.json
 !docker/
 !docker/nginx.conf
 

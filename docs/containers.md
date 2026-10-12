@@ -2,17 +2,16 @@
 
 ## Start the live application
 
-The host needs Docker, Docker Compose, Python 3.10 or newer and OpenSSL for local TLS setup. Build tools, tests, the web/API server and SQLite runtime are all inside containers.
+The host needs Docker and Docker Compose. Default startup uses HTTP and requires no TLS files. Build tools, tests, the web/API server and SQLite runtime are all inside containers.
 
 ```sh
-python scripts/create-local-tls.py
 docker compose up --build -d
 docker compose exec milo node scripts/setup-admin.cjs
 ```
 
 The administrator setup command prompts for the first administrator's email, name and password. Password entry is hidden. Bootstrap stops working once any account exists; there is no public registration or default password.
 
-Open https://localhost:8080/#Signup to create the first administrator through the browser instead of the interactive command. Signup signs you in automatically and closes once an account exists. Existing users sign in at https://localhost:8080. Use **Invitations** to create a 72-hour, single-use link for a member. Copy the link when created; the secret is not stored in readable form or shown again. Deliver it yourself; invitation emails are not sent by Milo yet.
+Open http://localhost:8080/#Signup to create the first administrator through the browser instead of the interactive command. Signup signs you in automatically and closes once an account exists. Existing users sign in at http://localhost:8080. Use **Invitations** to create a 72-hour, single-use link for a member. Copy the link when created; the secret is not stored in readable form or shown again. Deliver it yourself; invitation emails are not sent by Milo yet.
 
 The live app starts empty. Add your own applications, CV documents/text, preferences and cover letters. These are saved in the `milo-data` Docker volume. A normal `docker compose down` preserves the volume. Removing the volume deletes the data.
 
@@ -32,10 +31,10 @@ For another local port, set both:
 
 ```dotenv
 MILO_PORT=8090
-MILO_PUBLIC_URL=https://localhost:8090
+MILO_PUBLIC_URL=http://localhost:8090
 ```
 
-For your server, configure the externally reachable HTTPS origin, such as `https://milo.example.com`, and supply a matching trusted TLS certificate in `certs/cert.pem` and private key in `certs/key.pem`. Route any proxy to the container over HTTPS and validate its certificate. Forward browser Origin and Host normally; Milo does not trust forwarded headers to construct invitation URLs or identify clients. HTTPS ingress automation remains a later deployment task. The live server accepts HTTPS only.
+For your server, set `MILO_PUBLIC_URL` to the external HTTPS origin, such as `https://milo.example.com`. Your reverse proxy manages TLS and forwards to the container over HTTP (`http://127.0.0.1:8080` for a host proxy, or `http://milo:8080` on a shared Docker network). Preserve browser Origin and Host headers. The configured origin controls Secure cookies, invitations and OAuth callbacks independently of the HTTP listener. Forwarded headers do not override origin validation or identify clients.
 
 Keep the default `MILO_BIND_ADDRESS=127.0.0.1` for a host-based proxy. If another machine/container must access the published port, configure the bind address and network intentionally. The built-in login limiter uses socket addresses; behind a proxy, users may share a limit. A trusted-proxy-aware limiter is a later deployment improvement.
 
@@ -57,7 +56,7 @@ The original fictional screen draft is preserved and separated from private live
 docker compose --profile preview up --build -d
 ```
 
-Open http://localhost:8081 for the design preview, or https://localhost:8080 for the live app. The preview has no authentication and no connection to the live database. Prototype-only email, learning and discovery screens are still available there.
+Open http://localhost:8081 for the design preview, or http://localhost:8080 for the live app. The preview has no authentication and no connection to the live database. Prototype-only email, learning and discovery screens are still available there.
 
 ## Storage and backups
 
@@ -84,4 +83,4 @@ Node 24 provides the built-in SQLite API, which is still experimental in that re
 
 References: [Node 24 SQLite API](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html), [Docker multi-stage builds](https://docs.docker.com/build/building/multi-stage/), [Compose startup](https://docs.docker.com/reference/cli/docker/compose/up/).
 
-Local TLS uses a disposable self-signed certificate valid for 30 days. Trust `certs/cert.pem` in your local browser before signing in. The generator preserves existing certificates. For production, use a trusted certificate and protect its private key with file permissions that allow only the operator and container user (UID 1000) to read it. Never commit TLS keys. Set `MILO_TLS_KEY` and `MILO_TLS_CERT` for direct Node execution.
+Optional direct TLS for Node execution requires explicit `MILO_TLS_KEY` and `MILO_TLS_CERT` paths. The legacy local certificate generators remain available, but default Docker startup does not use or mount certificates. Never commit private keys.

@@ -14,7 +14,7 @@ Job toolkit separates the job brief, comparison/generation controls and editable
 
 ## Browser verification
 
-With Milo's Compose network and TLS files present, run:
+With Milo's Compose network present, run:
 
 ```sh
 python scripts/check-live-ui.py

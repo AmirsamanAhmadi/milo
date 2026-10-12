@@ -5,7 +5,7 @@ services:
       context: .
       target: runtime
     environment:
-      MILO_PUBLIC_URL: "${MILO_PUBLIC_URL:-https://localhost:8080}"
+      MILO_PUBLIC_URL: "${MILO_PUBLIC_URL:-http://localhost:8080}"
       ADZUNA_APP_ID: "${ADZUNA_APP_ID:-}"
       ADZUNA_APP_KEY: "${ADZUNA_APP_KEY:-}"
       APIFY_TOKEN: "${APIFY_TOKEN:-}"
@@ -22,7 +22,6 @@ services:
       - "${MILO_BIND_ADDRESS:-127.0.0.1}:${MILO_PORT:-8080}:8080"
     volumes:
       - milo-data:/data
-      - ./certs:/certs:ro
     restart: unless-stopped
     init: true
     read_only: true

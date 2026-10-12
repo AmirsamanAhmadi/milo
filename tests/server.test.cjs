@@ -15,6 +15,19 @@ const {openStore}=require('../src/server/store.cjs');
 const {createService}=require('../src/server/service.cjs');
 const {handler}=require('../src/server/http.cjs');
 const origin='http://localhost:8080';
+test('HTTP upstream supports an HTTPS public origin without trusting forwarded headers',async()=>{
+ const f=await fixture(),http=require('node:http'),publicURL='https://milo.example.com';
+ const server=http.createServer(handler(createService(f.db,{publicURL})));
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const base='http://127.0.0.1:'+server.address().port;
+ try{
+ const response=await fetch(base+'/api/login',{method:'POST',headers:{'Content-Type':'application/json',Origin:publicURL},body:JSON.stringify({email:'admin@example.com',password:adminPassword})});
+ assert.equal(response.status,200);assert.match(response.headers.get('set-cookie'),/; Secure/);
+ const spoofed=await fetch(base+'/api/login',{method:'POST',headers:{'Content-Type':'application/json',Origin:base,'X-Forwarded-Proto':'https','X-Forwarded-Host':'milo.example.com'},body:JSON.stringify({email:'admin@example.com',password:adminPassword})});
+ assert.equal(spoofed.status,403);
+ assert.equal((await fetch(base+'/health')).status,200);
+ }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.db.close();}
+});
 const app={role:'Delivery Lead',company:'Example',location:'Auckland',workplace:'Hybrid',employment_type:'Permanent',source:'SEEK',url:'https://example.com/job',salary:130000,stage:'Applied',applied_at:'2026-10-08',follow_up:'',description:'Verified requirements',notes:'Private notes'};
 test('CV and cover-letter uploads immediately score and keep document types private and separate',async()=>{
  const f=await fixture();try{

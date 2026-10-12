@@ -1,0 +1,16 @@
+[
+  {
+    "findingId": "9f86b79c-f809-4322-8fb6-ce5b9984774e",
+    "ruleId": "javascript/HttpToHttps",
+    "path": "src/server/main.cjs",
+    "sourceLine": "const server=tls?https.createServer(tls,handler(service)):http.createServer(handler(service));",
+    "reason": "Intentional HTTP upstream for an HTTPS reverse proxy, explicitly requested by the operator. Compose publishes only on loopback by default; production uses a private proxy network and an HTTPS public origin for Secure cookies. Direct TLS remains available."
+  },
+  {
+    "findingId": "a140040f-47f0-489b-989c-7f8227ce446d",
+    "ruleId": "javascript/HttpToHttps/test",
+    "path": "tests/server.test.cjs",
+    "sourceLine": " const server=http.createServer(handler(createService(f.db,{publicURL})));",
+    "reason": "Loopback-only regression test of the HTTP proxy upstream with an HTTPS public origin. It uses random fixture credentials, verifies Secure cookies and rejects spoofed forwarded headers."
+  }
+]
