@@ -20,7 +20,7 @@ Records survive container restarts in the `milo-data` named volume. See [Contain
 
 - Real invite-only accounts, password hashing, database-backed sessions and logout.
 - Administrator-only member listing and invitation creation/revocation.
-- Private application records: role, company, location, work arrangement, employment type, annual NZD salary, source URL, description, notes, dates and stage history.
+- Private application records: role, company, location, work arrangement, employment type, annual salary in the currency of the selected country, source URL, description, notes, dates and stage history.
 - Application search/stage filters and a dashboard with pipeline/offer/follow-up counts.
 - Live job search with keyword, location and remote filters, pagination, original listing links and reviewed import into applications. Indeed, LinkedIn and Glassdoor use Python JobSpy; Working Nomads and Arbeitnow work without credentials. Adzuna NZ and SEEK/Apify require credentials. See [job discovery](docs/job-discovery.md).
 - Private PDF/DOCX/TXT uploads, authorized downloads/removal and reviewed CV text. Readable PDF/Word/TXT files can supply local CV assessments; scanned PDFs require pasted text.
@@ -74,3 +74,5 @@ Local TLS uses a disposable self-signed certificate valid for 30 days. Trust `ce
 
 
 Backup and local TLS setup now use Python's standard library (Python 3.10+), with no additional pip dependencies; live JobSpy search uses the pinned package in requirements.txt. The container includes Python. The live service, administrator setup, browser interface and preview generator retain JavaScript. Legacy backup and shell TLS commands remain available for compatibility. Python backups refuse to overwrite existing files; choose a fresh destination each time.
+
+See [the interface review](docs/ui-review.md) for navigation, currency behavior and browser verification.

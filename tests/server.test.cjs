@@ -34,6 +34,22 @@ test('live job searches share a bounded cache and filter provider pages',async()
  time=16*60000;await search(settings);assert.equal(requests,2);
 });
 
+test('country preferences derive salary currency and applications preserve their own currency',async()=>{
+ const f=await fixture();try{
+ const prefs={titles:'Engineer',location:'',workplace:'Any',type:'Any',salary:50000,unknownSalary:true,excluded:''};
+ for(const [country,currency] of Object.entries({'new zealand':'NZD',australia:'AUD','united kingdom':'GBP',usa:'USD'})){
+  const saved=await f.call('PUT','/api/preferences',{...prefs,country},f.admin.cookie);
+  assert.equal(saved.body.preferences.currency,currency);
+  const created=await f.call('POST','/api/applications',{...app,country},f.admin.cookie);
+  assert.equal(created.body.application.currency,currency);
+ }
+ assert.equal((await f.call('POST','/api/applications',{...app,country:'australia',currency:'NZD'},f.admin.cookie)).status,400);
+ assert.equal((await f.call('PUT','/api/preferences',{...prefs,country:'unknown'},f.admin.cookie)).status,400);
+ const all=(await f.call('GET','/api/applications',{},f.admin.cookie)).body.applications;
+ assert.deepEqual(new Set(all.map(a=>a.currency)),new Set(['NZD','AUD','GBP','USD']));
+ }finally{f.db.close();}
+});
+
 test('combined job search retains successful sources and reports failures without duplicating URLs',async()=>{
  const {createJobSearch}=require('../src/server/jobs.cjs');
  const search=createJobSearch({fetchJobs:async settings=>{

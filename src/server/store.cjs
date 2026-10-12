@@ -63,6 +63,10 @@ function openStore(filename) {
     CREATE INDEX IF NOT EXISTS events_application ON stage_events(application_id, user_id);
     PRAGMA user_version=1;
   `);
+  const columns=new Set(db.prepare('PRAGMA table_info(applications)').all().map(column=>column.name));
+  if(!columns.has('country'))db.exec("ALTER TABLE applications ADD COLUMN country TEXT NOT NULL DEFAULT 'new zealand'");
+  if(!columns.has('currency'))db.exec("ALTER TABLE applications ADD COLUMN currency TEXT NOT NULL DEFAULT 'NZD'");
+  db.exec('PRAGMA user_version=2');
   return db;
 }
 module.exports = { openStore };

@@ -9,7 +9,8 @@ const codexAccount=require('./codex-account.cjs');
 const stages = ['Discovered','Ready','Applied','Recruiter screen','Assessment','Interview','Team match','Technical interview','Final round','Offer','Rejected','Withdrawn','No response'];
 const workplaces = ['Remote','Hybrid','Onsite'];
 const types = ['Permanent','Contract','Part-time','Internship'];
-const defaultPreferences = { titles:'', location:'', workplace:'Any', type:'Any', salary:0, unknownSalary:true, excluded:'' };
+const currencies={'new zealand':'NZD',australia:'AUD','united kingdom':'GBP',usa:'USD'};
+const defaultPreferences = { titles:'', location:'', workplace:'Any', type:'Any', salary:0, unknownSalary:true, excluded:'',country:'new zealand',currency:'NZD' };
 class Problem extends Error { constructor(status, message) { super(message); this.status=status; } }
 const fail = (status,message) => { throw new Problem(status,message); };
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -51,10 +52,12 @@ function httpURL(value) {
   catch { fail(400,'Use an HTTP(S) source URL without credentials.'); }
 }
 function applicationInput(data) {
+  const country=data.country??'new zealand',currency=currencies[country];
+  if(!currency||data.currency&&data.currency!==currency)fail(400,'Choose a valid country and its salary currency.');
   if (!stages.includes(data.stage)||!workplaces.includes(data.workplace)||!types.includes(data.employment_type)) fail(400,'Choose a valid stage, workplace and employment type.');
   const salary=data.salary===null||data.salary===''||data.salary===undefined?null:Number(data.salary);
   if(salary!==null && (!Number.isSafeInteger(salary)||salary<0||salary>10000000)) fail(400,'Enter a valid annual salary.');
-  return { role:text(data.role,'role',200,true),company:text(data.company,'company',200,true),location:text(data.location??'','location'),workplace:data.workplace,employment_type:data.employment_type,source:text(data.source??'','source'),url:httpURL(data.url),salary,stage:data.stage,applied_at:date(data.applied_at,'application date'),follow_up:date(data.follow_up,'follow-up date'),description:text(data.description??'','job description',30000),notes:text(data.notes??'','notes',10000) };
+  return { role:text(data.role,'role',200,true),company:text(data.company,'company',200,true),location:text(data.location??'','location'),workplace:data.workplace,employment_type:data.employment_type,source:text(data.source??'','source'),url:httpURL(data.url),salary,stage:data.stage,applied_at:date(data.applied_at,'application date'),follow_up:date(data.follow_up,'follow-up date'),description:text(data.description??'','job description',30000),notes:text(data.notes??'','notes',10000),country,currency };
 }
 function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now(), jobSearch=createJobSearch(), adzunaConfigured=Boolean(process.env.ADZUNA_APP_ID&&process.env.ADZUNA_APP_KEY), seekConfigured=Boolean(process.env.APIFY_TOKEN), aiGenerator=generateAI, aiConfigured=Boolean(process.env.OPENAI_API_KEY&&process.env.OPENAI_MODEL), aiModel=process.env.OPENAI_MODEL||'', credentialVault=null }={}) {
   let aiActive=0;
@@ -245,18 +248,18 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
       if(path==='/api/applications'&&method==='GET')return {status:200,body:{applications:db.prepare('SELECT * FROM applications WHERE user_id=? ORDER BY updated_at DESC').all(user.id)}};
       if(path==='/api/applications'&&method==='POST') {
         const a=applicationInput(body),id=randomUUID(),time=iso(now());
-        transaction(()=>{db.prepare('INSERT INTO applications (id,user_id,role,company,location,workplace,employment_type,source,url,salary,stage,applied_at,follow_up,description,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,user.id,...Object.values(a),time,time);db.prepare('INSERT INTO stage_events VALUES (?,?,?,?,?,?)').run(randomUUID(),id,user.id,null,a.stage,time);});
+        transaction(()=>{db.prepare('INSERT INTO applications (id,user_id,role,company,location,workplace,employment_type,source,url,salary,stage,applied_at,follow_up,description,notes,country,currency,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,user.id,...Object.values(a),time,time);db.prepare('INSERT INTO stage_events VALUES (?,?,?,?,?,?)').run(randomUUID(),id,user.id,null,a.stage,time);});
         return {status:201,body:{application:ownApplication(id,user)}};
       }
       const appMatch=path.match(/^\/api\/applications\/([a-f0-9-]+)$/);
       if(appMatch) {
         const a=ownApplication(appMatch[1],user);
         if(method==='GET')return {status:200,body:{application:a,history:db.prepare('SELECT previous_stage,stage,created_at FROM stage_events WHERE application_id=? AND user_id=? ORDER BY created_at DESC').all(a.id,user.id)}};
-        if(method==='PUT') {const next=applicationInput(body),time=iso(now());transaction(()=>{db.prepare('UPDATE applications SET role=?,company=?,location=?,workplace=?,employment_type=?,source=?,url=?,salary=?,stage=?,applied_at=?,follow_up=?,description=?,notes=?,updated_at=? WHERE id=? AND user_id=?').run(...Object.values(next),time,a.id,user.id);if(a.stage!==next.stage)db.prepare('INSERT INTO stage_events VALUES (?,?,?,?,?,?)').run(randomUUID(),a.id,user.id,a.stage,next.stage,time);});return {status:200,body:{application:ownApplication(a.id,user)}};}
+        if(method==='PUT') {const next=applicationInput(body),time=iso(now());transaction(()=>{db.prepare('UPDATE applications SET role=?,company=?,location=?,workplace=?,employment_type=?,source=?,url=?,salary=?,stage=?,applied_at=?,follow_up=?,description=?,notes=?,country=?,currency=?,updated_at=? WHERE id=? AND user_id=?').run(...Object.values(next),time,a.id,user.id);if(a.stage!==next.stage)db.prepare('INSERT INTO stage_events VALUES (?,?,?,?,?,?)').run(randomUUID(),a.id,user.id,a.stage,next.stage,time);});return {status:200,body:{application:ownApplication(a.id,user)}};}
       }
       if(path==='/api/preferences') {
-        if(method==='GET')return {status:200,body:{preferences:JSON.parse(statement('SELECT data FROM preferences WHERE user_id=?',user.id)?.data||JSON.stringify(defaultPreferences))}};
-        if(method==='PUT') {if(!['Any',...workplaces].includes(body.workplace)||!['Any',...types].includes(body.type)||typeof body.unknownSalary!=='boolean'||!Number.isSafeInteger(body.salary)||body.salary<0||body.salary>10000000)fail(400,'Choose valid preferences.');const p={titles:text(body.titles,'titles',1000),location:text(body.location,'location'),workplace:body.workplace,type:body.type,salary:body.salary,unknownSalary:body.unknownSalary,excluded:text(body.excluded,'excluded companies',1000)};db.prepare('INSERT INTO preferences VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(user.id,JSON.stringify(p));return {status:200,body:{preferences:p}};}
+        if(method==='GET')return {status:200,body:{preferences:{...defaultPreferences,...JSON.parse(statement('SELECT data FROM preferences WHERE user_id=?',user.id)?.data||'{}')}}};
+        if(method==='PUT') {const country=body.country??'new zealand',currency=currencies[country];if(!currency||body.currency&&body.currency!==currency||!['Any',...workplaces].includes(body.workplace)||!['Any',...types].includes(body.type)||typeof body.unknownSalary!=='boolean'||!Number.isSafeInteger(body.salary)||body.salary<0||body.salary>10000000)fail(400,'Choose valid preferences.');const p={titles:text(body.titles,'titles',1000),location:text(body.location,'location'),workplace:body.workplace,type:body.type,salary:body.salary,unknownSalary:body.unknownSalary,excluded:text(body.excluded,'excluded companies',1000),country,currency};db.prepare('INSERT INTO preferences VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(user.id,JSON.stringify(p));return {status:200,body:{preferences:p}};}
       }
       if(path==='/api/cv'&&method==='GET'){const cv=await cvText(user),assessment=await processCV({cv:cv.text,jobs:[]});return {status:200,body:{...cv,assessment:assessment.cv,documents:db.prepare('SELECT id,name,kind,length(bytes) AS size,created_at FROM documents WHERE user_id=? ORDER BY created_at DESC').all(user.id)}};}
       if(path==='/api/cv'&&method==='PUT') {const contents=text(body.text,'CV text',100000);db.prepare('INSERT INTO cv_profiles VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET text=excluded.text,updated_at=excluded.updated_at').run(user.id,contents,iso(now()));return {status:200,body:{ok:true}};}
