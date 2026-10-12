@@ -79,6 +79,18 @@ if(!base||!process.env.MILO_UI_FIXTURE)throw Error('Set MILO_UI_URL and MILO_UI_
   await page.locator('#notice').evaluate(element=>element.textContent='');await page.screenshot({path:output+'/suggested-roles.png',fullPage:true});
   const preparationJob=savedJobs.applications.find(j=>j.url==='https://example.com/jobs/study');await page.goto(base+'/#Interview/'+preparationJob.id);await page.getByRole('heading',{name:'Your evidence against this job'}).waitFor();assert.ok((await page.locator('main').textContent()).includes('reduced reporting time by 35%'));
   await page.screenshot({path:output+'/interview-preparation.png',fullPage:true});
+  await page.goto(base+'/#Job%20toolkit/'+application.id);await page.locator('#toolkit-cv').waitFor();
+  const draft='UI Review\nExperience\nDelivered Agile projects and improved reporting by 25%.\nSkills\nProject management and stakeholder communication.';
+  let generatedFixture=false;
+  await page.route('**/api/toolkit',async route=>{const action=route.request().postDataJSON().action;if(action==='tailor'){await new Promise(resolve=>setTimeout(resolve,1800));generatedFixture=true;}else if(!generatedFixture||action!=='load')return route.continue();await route.fulfill({json:{tailoredCV:draft,coverLetter:'',assessment:null,cv:null,rule:null}});});
+  await page.locator('[data-toolkit-action="tailor"]').click();await page.locator('#toolkit-status .loading-state').waitFor();assert.ok(await page.locator('[data-toolkit-action="letter"]').isDisabled());
+  await page.screenshot({path:output+'/ai-generating.png',fullPage:true});
+  await page.waitForFunction(()=>document.querySelector('#toolkit-cv')?.value.startsWith('UI Review'));await page.unroute('**/api/toolkit');
+  await page.locator('#toolkit-cv').fill(draft+'\nReviewed final edit.');
+  for(const format of ['docx','pdf']){
+   const completed=page.waitForEvent('download');await page.locator(`[data-export-kind="cv"][data-export-format="${format}"]`).click();const download=await completed;assert.ok(download.suggestedFilename().endsWith('.'+format));const path=await download.path(),bytes=fs.readFileSync(path);assert.ok(bytes.subarray(0,4).equals(Buffer.from(format==='pdf'?'%PDF':'PK\x03\x04')));
+  }
+  await page.emulateMedia({reducedMotion:'reduce'});await page.evaluate(()=>document.querySelector('#toolkit-status').innerHTML='<span class="loading-orbit"></span>');assert.equal(await page.locator('#toolkit-status .loading-orbit').evaluate(element=>getComputedStyle(element).animationName),'none');await page.emulateMedia({reducedMotion:'no-preference'});
   await page.setViewportSize({width:390,height:844});
   for(const route of ['CV%20studio','Role%20preferences','Job%20toolkit/'+application.id,'AI%20settings']){
    await page.goto(base+'/#'+route);await page.locator('h1').waitFor();

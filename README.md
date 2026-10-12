@@ -39,6 +39,7 @@ Register Gmail/Outlook redirect URLs using your external HTTPS origin, for examp
 - Private PDF/DOCX/TXT uploads for CVs and cover letters, with immediate local scores, authorized downloads/removal and editable extracted text. Scanned documents require OCR or pasted text.
 - Local CV completeness checks and per-job keyword match scores, with matched skills, missing topics and CV evidence. Optional AI assessment, JD-specific CV tailoring and custom cover letters use a selected OpenAI, personal API key, local server or ChatGPT/Codex account. See [AI and ATS setup](docs/ai-and-ats.md). Scores do not predict hiring outcomes.
 - Job-specific custom cover-letter template builder, editing, persistent saving and TXT download.
+- Template-aware DOCX/PDF draft exports and animated loading/generation states. See [export styling and limits](docs/document-exports.md).
 - Optional roles suggested from the active CV and cover letter, with document evidence and one-click searches. Interview preparation pairs actual job requirements with CV examples, gaps, practice questions and study exercises.
 - Gmail and Outlook connections can be configured through the portal and synced manually. See [email setup](docs/email-sync.md).
 - Personal name editing, responsive layouts and light/dark mode.
@@ -65,6 +66,7 @@ Open http://localhost:8081. You can also open `index.html` directly. Preview edi
 - [Container setup](docs/containers.md): startup, administration and storage.
 - [JobOps feature coverage](docs/feature-parity.md): broader parity backlog.
 - [Reviewed pull requests](docs/upstream-pull-requests.json): upstream PR snapshot.
+- [Production status](docs/deployment-status.md): why historical GitHub deployments can remain red after manual server installation.
 
 ## Development and tests
 

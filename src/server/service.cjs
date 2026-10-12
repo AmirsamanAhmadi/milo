@@ -12,6 +12,7 @@ const types = ['Permanent','Contract','Part-time','Internship'];
 const {countryFor,geography}=require('./geography.cjs');
 const {rankJobs,filterSponsorship}=require('./career.cjs');
 const {createMail}=require('./mail.cjs');
+const {exportDocument}=require('./document-export.cjs');
 const currencies=new Proxy({}, {get:(_,key)=>countryFor(key)?.currency});
 const defaultPreferences = { titles:'', location:'', workplace:'Any', type:'Any', salary:0, unknownSalary:true, excluded:'',sponsorship:'Any',country:'new zealand',currency:'NZD' };
 class Problem extends Error { constructor(status, message) { super(message); this.status=status; } }
@@ -62,8 +63,8 @@ function applicationInput(data) {
   if(salary!==null && (!Number.isSafeInteger(salary)||salary<0||salary>1000000000000)) fail(400,'Enter a valid annual salary.');
   return { role:text(data.role,'role',200,true),company:text(data.company,'company',200,true),location:text(data.location??'','location'),workplace:data.workplace,employment_type:data.employment_type,source:text(data.source??'','source'),url:httpURL(data.url),salary,stage:data.stage,applied_at:date(data.applied_at,'application date'),follow_up:date(data.follow_up,'follow-up date'),description:text(data.description??'','job description',30000),notes:text(data.notes??'','notes',10000),country,currency };
 }
-function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now(), jobSearch=createJobSearch(), adzunaConfigured=Boolean(process.env.ADZUNA_APP_ID&&process.env.ADZUNA_APP_KEY), seekConfigured=Boolean(process.env.APIFY_TOKEN), aiGenerator=generateAI, aiConfigured=Boolean(process.env.OPENAI_API_KEY&&process.env.OPENAI_MODEL), aiModel=process.env.OPENAI_MODEL||'', credentialVault=null }={}) {
-  let aiActive=0;
+function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now(), jobSearch=createJobSearch(), adzunaConfigured=Boolean(process.env.ADZUNA_APP_ID&&process.env.ADZUNA_APP_KEY), seekConfigured=Boolean(process.env.APIFY_TOKEN), aiGenerator=generateAI, aiConfigured=Boolean(process.env.OPENAI_API_KEY&&process.env.OPENAI_MODEL), aiModel=process.env.OPENAI_MODEL||'', credentialVault=null, documentExporter=exportDocument }={}) {
+  let aiActive=0,exportActive=0;
   const vault=credentialVault||createVault();
   function aiConfiguration(user,includeKey=false){
     const saved=db.prepare('SELECT * FROM user_ai WHERE user_id=?').get(user.id);
@@ -150,6 +151,17 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         return {status:201,body:{user:publicUser(u)},cookie:startSession(u)};
       }
       const user=authenticate(cookie);
+      if(path==='/api/exports/templates'&&method==='GET')return {status:200,body:{templates:db.prepare('SELECT id,name,kind,purpose FROM documents WHERE user_id=? ORDER BY created_at DESC,rowid DESC').all(user.id)}};
+      if(path==='/api/exports'&&method==='POST'){
+        throttle('exports:'+user.id);
+        if(!['docx','pdf'].includes(body.format)||!['CV','Cover letter'].includes(body.purpose))fail(400,'Choose a document type and DOCX or PDF.');
+        const contents=text(body.text,'reviewed draft',100000,true);
+        const template=body.templateId?statement('SELECT * FROM documents WHERE id=? AND user_id=?',text(body.templateId,'template ID',40,true),user.id):body.templateId===''?null:statement('SELECT * FROM documents WHERE user_id=? AND purpose=? ORDER BY created_at DESC,rowid DESC LIMIT 1',user.id,body.purpose);
+        if(body.templateId&&!template)fail(404,'Template not found.');
+        if(exportActive>=2)fail(429,'Document rendering is busy. Try again shortly.');exportActive++;let result;try{result=await documentExporter({text:contents,format:body.format,template:template?{kind:template.kind,base64:Buffer.from(template.bytes).toString('base64')}:null});}catch(e){fail(422,e.message);}finally{exportActive--;}
+        authenticate(cookie);
+        return {status:200,binary:Buffer.from(result.base64,'base64'),contentType:body.format==='pdf'?'application/pdf':'application/vnd.openxmlformats-officedocument.wordprocessingml.document',name:(body.purpose==='CV'?'tailored-cv':'cover-letter')+'.'+body.format,exportWarnings:result.warnings};
+      }
       if(path==='/api/geography'&&method==='GET')return {status:200,body:{countries:geography()}};
       if(path.startsWith('/api/geography/')&&method==='GET'){const country=geography(decodeURIComponent(path.slice(15)));if(!country)fail(404,'Country not found.');return {status:200,body:{country}};}
       if(path==='/api/jobs/recommendations'&&method==='GET'){const cv=await cvText(user),cover=await coverText(user);return {status:200,body:await processCV({recommendDocuments:true,cv:cv.text,cover:cover.text})};}

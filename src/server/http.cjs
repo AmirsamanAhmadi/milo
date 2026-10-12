@@ -38,7 +38,8 @@ function handler(service,{assetsDir=path.resolve(__dirname,'../live')}={}) {
       if(result.cookie)res.setHeader('Set-Cookie',result.cookie);
       if(result.redirect){res.setHeader('Location',result.redirect);res.end();return;}
       if(result.binary) {
-        res.setHeader('Content-Type','application/octet-stream');
+        res.setHeader('Content-Type',result.contentType||'application/octet-stream');
+        if(result.exportWarnings)res.setHeader('X-Milo-Export-Warnings',encodeURIComponent(JSON.stringify(result.exportWarnings)));
         res.setHeader('Content-Disposition',`attachment; filename="milo-document"; filename*=UTF-8''${encodeURIComponent(result.name).replace(/'/g,'%27')}`);
         await pipeline(Readable.from([Buffer.from(result.binary)]),res);
       } else {res.setHeader('Content-Type','application/json; charset=utf-8');await pipeline(Readable.from([json(result.body)]),res);}

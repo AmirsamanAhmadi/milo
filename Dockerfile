@@ -28,7 +28,7 @@ COPY requirements.txt ./requirements.txt
 RUN npm install --prefix /opt/codex --omit=dev @openai/codex@0.162.1 \
     && ln -s /opt/codex/node_modules/.bin/codex /usr/local/bin/codex
 RUN apk upgrade --no-cache \
-    && apk add --no-cache python3 py3-pip py3-virtualenv ca-certificates libstdc++ \
+    && apk add --no-cache python3 py3-pip py3-virtualenv ca-certificates libstdc++ libreoffice-writer font-liberation font-dejavu \
     && python3 -m virtualenv /opt/jobspy \
     && /opt/jobspy/bin/pip install --no-cache-dir --only-binary=:all: -r requirements.txt \
     && rm -rf /usr/local/lib/node_modules /opt/yarn* \
@@ -38,6 +38,9 @@ COPY --from=build /app/src/server/ ./src/server/
 COPY --from=build /app/src/live/ ./src/live/
 COPY --from=build /app/scripts/bootstrap-admin.cjs /app/scripts/setup-admin.cjs /app/scripts/backup.cjs ./scripts/
 COPY --from=build /app/scripts/backup.py ./scripts/
+COPY tests/test_document_export.py ./tests/test_document_export.py
+RUN PYTHONDONTWRITEBYTECODE=1 /opt/jobspy/bin/python -m unittest discover -s tests -p 'test_document_export.py' \
+    && rm tests/test_document_export.py && rmdir tests
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

@@ -470,3 +470,17 @@ test('JSON responses and errors escape markup without changing parsed values',as
   assert.equal(JSON.parse(res.value)[fail?'error':'value'],value);
  }
 });
+
+test('document exports enforce template ownership and return reviewed draft bytes',async()=>{
+ let captured;const f=await fixture(':memory:',{documentExporter:async data=>{captured=data;return {base64:Buffer.from('fixture-rendered-document').toString('base64'),warnings:['Fixture formatting note']};}});
+ try{
+ const upload=await f.call('POST','/api/documents',{name:'template.txt',purpose:'CV',base64:Buffer.from('Original template text').toString('base64')},f.admin.cookie);
+ const member=await f.member('export-member@example.com');
+ const input={purpose:'CV',format:'docx',text:'Reviewed and edited draft',templateId:upload.body.id};
+ assert.equal((await f.call('POST','/api/exports',input,member.cookie)).status,404);assert.equal(captured,undefined);
+ assert.equal((await f.call('POST','/api/exports',{...input,format:'html'},f.admin.cookie)).status,400);
+ assert.equal((await f.call('POST','/api/exports',{...input,text:''},f.admin.cookie)).status,400);
+ const result=await f.call('POST','/api/exports',input,f.admin.cookie);assert.equal(result.status,200);assert.equal(captured.text,input.text);assert.equal(captured.template.kind,'txt');assert.equal(result.name,'tailored-cv.docx');assert.equal(Buffer.from(result.binary).toString(),'fixture-rendered-document');assert.equal(result.exportWarnings.length,1);
+ assert.equal((await f.call('GET','/api/exports/templates',{},member.cookie)).body.templates.length,0);
+ }finally{f.db.close();}
+});

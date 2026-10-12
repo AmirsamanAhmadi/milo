@@ -33,5 +33,8 @@ Screenshots contain fictional review data:
 - [Email sync](screenshots/email-sync.png)
 - [Document upload scores](screenshots/document-scores.png)
 - [Suggested roles](screenshots/suggested-roles.png)
+- [AI generation progress](screenshots/ai-generating.png)
+
+Drafts now offer template-aware DOCX/PDF downloads, with local PDF rendering and visible format warnings. Loading and AI operations use indeterminate progress indicators with reduced-motion support. See [export details](document-exports.md).
 
 Backend currency validation is included in `npm test` and Docker builds. Python and service tests do not require the optional browser test image.
