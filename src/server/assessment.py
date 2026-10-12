@@ -19,7 +19,7 @@ SKILLS = {
     "Communication": ["communication", "communicate", "presentation"],
     "Customer service": ["customer service", "customer support"], "Sales": ["sales", "business development"],
     "Finance": ["finance", "accounting", "budget", "financial"], "Testing": ["testing", "quality assurance", "selenium"],
-    "Security": ["cybersecurity", "information security", "security"], "Design": ["ux", "ui", "figma", "design"],
+    "Security": ["cybersecurity", "information security", "security"], "Design": ["ux", "ui design", "ui designer", "user interface", "figma", "design"],
     "Operations": ["operations", "process improvement", "continuous improvement"],
 }
 
@@ -28,7 +28,7 @@ def mentions(text, term):
     return bool(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", text, re.I))
 
 
-def assess(cv, jobs):
+def assess(cv, jobs, minimum_words=30):
     cv = cv.strip()
     checks = [
         ("Contact email", bool(re.search(r"[^\s@]+@[^\s@]+\.[^\s@]+", cv))),
@@ -37,7 +37,7 @@ def assess(cv, jobs):
         ("Education or qualifications", bool(re.search(r"education|qualifications|certification|degree", cv, re.I))),
         ("Measurable achievements", bool(re.search(r"\d+\s*(?:%|percent)|\$\s*\d|\b(?:increased|reduced|improved|saved|delivered)\b.{0,80}\d", cv, re.I))),
     ]
-    available = len(cv.split()) >= 30
+    available = len(cv.split()) >= minimum_words
     overview = {"available": available, "score": sum(20 for _, found in checks if found) if available else None,
                 "label": "CV completeness", "checks": [{"name": name, "present": found} for name, found in checks],
                 "reason": "Add at least 30 words of readable CV text to assess your CV." if not available else "Five document checks, 20 points each; this is not a measure of employability."}
@@ -123,6 +123,16 @@ if __name__ == "__main__":
         if data.get('interview'):
             from interview import prepare
             result = prepare(data.get('cv', ''), data.get('job', {}))
+        elif data.get('recommendDocuments'):
+            from document_assessment import recommend_documents
+            result = recommend_documents(data.get('cv', ''), data.get('cover', ''))
+        elif data.get('coverAssessment'):
+            from document_assessment import cover_assessment
+            result = cover_assessment(data.get('text', ''), data.get('job'))
+        elif data.get('extract') and data.get('purpose'):
+            contents = extract(data['kind'], data['base64'])
+            from document_assessment import cover_assessment
+            result = {'text': contents, 'assessment': cover_assessment(contents, data.get('job')) if data['purpose'] == 'Cover letter' else assess(contents, [])['cv']}
         else:
             result = {"text": extract(data["kind"], data["base64"])} if data.get("extract") else assess(data.get("cv", ""), data.get("jobs", []))
         print(json.dumps(result))

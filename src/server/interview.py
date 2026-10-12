@@ -1,5 +1,6 @@
 """Build a local interview study plan from the JD and CV skill evidence."""
 from assessment import SKILLS, assess, mentions
+import re
 
 RESOURCES = {
     'Python': ('Python tutorial', 'https://docs.python.org/3/tutorial/'),
@@ -20,15 +21,39 @@ def prepare(cv, job):
     text = job.get('role', '') + ' ' + job.get('description', '')
     topics = [s for s, terms in SKILLS.items() if any(mentions(text, t) for t in terms)]
     topics.sort(key=lambda s: (s not in fit['missing'], s))
-    return {'role': job.get('role', ''), 'topics': [
-        {'skill': s, 'priority': 'Study first: no CV evidence found' if s in fit['missing'] else 'Refresh and prepare an example',
-         'exercise': f'Explain how you used {s}, describe a realistic problem for this role, and walk through your solution and trade-offs.',
-         'resource': {'title': RESOURCES[s][0], 'url': RESOURCES[s][1]} if s in RESOURCES else None}
-        for s in topics],
-        'checklist': ['Review the company website, products, customers and recent announcements.',
-                      'Prepare three STAR stories with measurable outcomes relevant to the job description.',
-                      'Review each stated responsibility and qualification; write down honest evidence and gaps.',
-                      'Practise a role-specific task and explain your reasoning aloud.',
-                      'Prepare questions about team goals, onboarding, success measures and work authorisation.'],
-        'questions': [f'Tell me about a time you applied {s} and what changed as a result.' for s in topics[:6]],
-        'note': 'Topics are inferred from the supplied job description. They are preparation guidance, not confirmed interview questions.'}
+    def lines(value):
+        return [s.strip(' \t-•')[:600] for s in re.split(r'\n|(?<=[.!?])\s+', value) if len(s.split()) >= 3]
+    requirements = [line for line in lines(job.get('description', ''))
+                    if not re.search(r'\bsalary\b|\bbenefits\b|sponsorship.{0,30}(?:available|offered)|equal opportunity|apply (?:at|online)|we offer', line, re.I)][:18]
+    cv_lines = lines(cv)
+    stop = {'with', 'this', 'that', 'from', 'have', 'your', 'will', 'team', 'work', 'role', 'the', 'and', 'for'}
+    def tokens(value):
+        return {w.lower() for w in re.findall(r'[\w+#.-]{3,}', value) if w.lower() not in stop}
+    comparisons = []
+    for requirement in requirements:
+        requested = tokens(requirement)
+        evidence = sorted(cv_lines, key=lambda line: len(requested & tokens(line)), reverse=True)
+        best = evidence[0] if evidence and len(requested & tokens(evidence[0])) >= 2 else ''
+        company = job.get('company') or job.get('role', 'this role')
+        question = (f'Your CV describes “{best}”. What decisions did you make, and how would you adapt that experience to “{requirement}” at {company}?' if best else
+                    f'{company} asks for “{requirement}”. With no direct example in your CV, what transferable experience and practical learning plan would you bring to this responsibility?')
+        metrics = re.findall(r'\b\d+(?:\.\d+)?\s*(?:%|percent)|\$\s*[\d,]+', best)
+        comparisons.append({'requirement': requirement, 'evidence': best,
+            'question': question,
+            'answerOutline': [f'Start with your CV example: “{best}”.' if best else 'No direct CV evidence found. Explain the gap honestly and identify relevant transferable experience.',
+                              'Explain your own actions, decisions and trade-offs for this specific requirement.',
+                              f'Explain the reported outcome ({", ".join(metrics)}) and how you measured it.' if metrics else 'Use the actual outcome in your CV; add detail only if you can verify it.']})
+    study = []
+    for skill in topics:
+        requirement = next((r for r in requirements if any(mentions(r, t) for t in SKILLS[skill])), job.get('description', '')[:600])
+        evidence = next((r for r in cv_lines if any(mentions(r, t) for t in SKILLS[skill])), '')
+        study.append({'skill': skill, 'priority': 'Study first: no CV evidence found' if not evidence else 'Prepare your CV example',
+                      'requirement': requirement, 'evidence': evidence,
+                      'exercise': f'Practise meeting “{requirement}”. ' + (f'Use your example “{evidence}” to explain what you owned and how the outcome relates to this job.' if evidence else f'Study {skill}, complete a small practical exercise for this requirement, and explain your current experience honestly.'),
+                      'resource': {'title': RESOURCES[skill][0], 'url': RESOURCES[skill][1]} if skill in RESOURCES else None})
+    checklist = [f'Prepare evidence for: “{item["requirement"]}”.' for item in comparisons[:4]]
+    return {'role': job.get('role', ''), 'company': job.get('company', ''), 'topics': study,
+            'requirements': comparisons, 'checklist': checklist,
+            'questions': [item['question'] for item in comparisons[:6]],
+            'cvAvailable': len(cv.split()) >= 30,
+            'note': 'Prepared from your active CV and this job description. Quoted evidence is yours; inferred relevance needs your review. These are practice questions, not confirmed employer questions.'}

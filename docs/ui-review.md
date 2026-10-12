@@ -6,7 +6,9 @@ Role preferences use separate sections for roles/location, work arrangement/pay 
 
 Visa sponsorship can be required, required with unknown listings included, or not required. Explicit negative sponsorship wording takes precedence over positive keywords; unstated information stays unknown. Live jobs sort by highest local CV keyword score, with unscored jobs last. Save job creates an application immediately, independently of preference filtering; saved jobs appear in Applications. CV recommendations derive search terms from the uploaded/reviewed CV locally, and start automatically when no target keywords are saved. The recommendation button can also replace an existing search.
 
-Interview preparation uses the selected JD and CV gaps to prioritize study topics, link to official learning resources and suggest practice questions. It is available on live listings, saved applications and Job toolkit. Email sync supports Gmail and Outlook OAuth; see [mailbox setup](email-sync.md).
+Interview preparation quotes requirements from the selected job and actual CV excerpts, identifies evidence gaps and builds practice questions and answer outlines around that pair. Study exercises use the same requirements and CV examples. Inferred relevance needs review; no accomplishments are invented. It is available on live listings, saved applications and Job toolkit. Email sync supports Gmail and Outlook OAuth; see [mailbox setup](email-sync.md).
+
+CV & cover letters accepts PDF, DOCX and TXT uploads for both document types. Text extraction and local scoring happen in the upload request, and results appear immediately. CVs use completeness checks; cover letters use writing checks, optionally against a selected saved role/company. Unreadable files retain a warning and an unavailable score. New UI uploads become the active document of their type; cover letters never replace the active CV. Reviewed text can be edited and rescored. Job search always shows optional role suggestions with their CV/cover-letter source and evidence, even when target preferences already exist. Selecting a suggestion searches that role.
 
 Job toolkit separates the job brief, comparison/generation controls and editable drafts. AI settings presents provider cards, relevant key inputs and an account-sign-in panel. Layouts use the existing light/dark theme and collapse on smaller screens.
 
@@ -29,5 +31,7 @@ Screenshots contain fictional review data:
 - [Mobile navigation](screenshots/mobile-navigation.png)
 - [Interview preparation](screenshots/interview-preparation.png)
 - [Email sync](screenshots/email-sync.png)
+- [Document upload scores](screenshots/document-scores.png)
+- [Suggested roles](screenshots/suggested-roles.png)
 
 Backend currency validation is included in `npm test` and Docker builds. Python and service tests do not require the optional browser test image.

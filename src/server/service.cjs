@@ -95,13 +95,18 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
     if(!row) fail(404,'Application not found.');
     return row;
   }
+  async function documentText(user,purpose='CV'){
+    const document=statement('SELECT * FROM documents WHERE user_id=? AND purpose=? ORDER BY created_at DESC,rowid DESC LIMIT 1',user.id,purpose);
+    if(!document)return {text:'',source:''};
+    if(document.assessment_json)return {text:document.extracted_text,source:document.name,error:document.extraction_error,assessment:JSON.parse(document.assessment_json)};
+    try{const result=await processCV({extract:true,kind:document.kind,base64:Buffer.from(document.bytes).toString('base64'),purpose});db.prepare('UPDATE documents SET extracted_text=?,assessment_json=? WHERE id=? AND user_id=?').run(result.text,JSON.stringify(result.assessment),document.id,user.id);return {...result,source:document.name};}
+    catch{return {text:'',source:document.name,error:'Unable to extract readable text. Paste reviewed text below. Scanned PDFs need OCR.'};}
+  }
+  async function coverText(user){const reviewed=statement('SELECT text FROM cover_profiles WHERE user_id=?',user.id)?.text||'';return reviewed.trim()?{text:reviewed,source:'Reviewed cover letter'}:documentText(user,'Cover letter');}
   async function cvText(user){
     const reviewed=statement('SELECT text FROM cv_profiles WHERE user_id=?',user.id)?.text||'';
     if(reviewed.trim())return {text:reviewed,source:'Reviewed text'};
-    const document=statement('SELECT kind,bytes,name FROM documents WHERE user_id=? ORDER BY created_at DESC LIMIT 1',user.id);
-    if(!document)return {text:'',source:''};
-    try{const result=await processCV({extract:true,kind:document.kind,base64:Buffer.from(document.bytes).toString('base64')});return {text:result.text,source:document.name};}
-    catch{return {text:'',source:document.name,error:'Unable to extract readable text. Paste your CV text below. Scanned PDFs need OCR.'};}
+    return documentText(user);
   }
   async function bootstrap({email:address,name,password:secret}) {
     if(statement('SELECT id FROM users LIMIT 1')) fail(409,'An administrator already exists. Bootstrap is disabled.');
@@ -147,8 +152,8 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
       const user=authenticate(cookie);
       if(path==='/api/geography'&&method==='GET')return {status:200,body:{countries:geography()}};
       if(path.startsWith('/api/geography/')&&method==='GET'){const country=geography(decodeURIComponent(path.slice(15)));if(!country)fail(404,'Country not found.');return {status:200,body:{country}};}
-      if(path==='/api/jobs/recommendations'&&method==='GET'){const cv=await cvText(user),result=await processCV({cv:cv.text,jobs:[]});return {status:200,body:{roles:result.recommendations,skills:result.skills,available:result.cv.available}};}
-      if(path==='/api/interview'&&method==='POST'){const job={role:text(body.job?.role,'role',200,true),description:text(body.job?.description,'description',30000,true)};const cv=await cvText(user);return {status:200,body:await processCV({interview:true,cv:cv.text,job})};}
+      if(path==='/api/jobs/recommendations'&&method==='GET'){const cv=await cvText(user),cover=await coverText(user);return {status:200,body:await processCV({recommendDocuments:true,cv:cv.text,cover:cover.text})};}
+      if(path==='/api/interview'&&method==='POST'){const job={role:text(body.job?.role,'role',200,true),company:text(body.job?.company??'','company',200),description:text(body.job?.description,'description',30000,true)};const cv=await cvText(user);return {status:200,body:{...await processCV({interview:true,cv:cv.text,job}),cvSource:cv.source,cvError:cv.error}};}
       if(path==='/api/email'&&method==='GET')return {status:200,body:{accounts:mail.status(user),messages:db.prepare('SELECT provider,subject,sender,received_at,snippet,application_id FROM email_messages WHERE user_id=? ORDER BY received_at DESC LIMIT 100').all(user.id)}};
       if(path.startsWith('/api/email/callback/')&&method==='GET'){const provider=path.endsWith('/gmail')?'Gmail':path.endsWith('/outlook')?'Outlook':'';try{await mail.callback(user,provider,query);return {status:303,redirect:origin+'/#Email%20sync',body:{ok:true}};}catch{fail(400,'Email connection failed or expired. Return to Email sync and reconnect.');}}
       if(path==='/api/email/connect'&&method==='POST'){try{return {status:200,body:{url:mail.connect(user,body.provider)}};}catch(e){fail(400,e.message);}}
@@ -278,16 +283,23 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         if(method==='GET')return {status:200,body:{preferences:{...defaultPreferences,...JSON.parse(statement('SELECT data FROM preferences WHERE user_id=?',user.id)?.data||'{}')}}};
         if(method==='PUT') {const country=body.country??'new zealand',currency=currencies[country];if(!currency||body.currency&&body.currency!==currency||!['Any',...workplaces].includes(body.workplace)||!['Any',...types].includes(body.type)||typeof body.unknownSalary!=='boolean'||!Number.isSafeInteger(body.salary)||body.salary<0||body.salary>1000000000000)fail(400,'Choose valid preferences.');const sponsorship=body.sponsorship||'Any';if(!['Any','Required','Required, include unknown','Not required'].includes(sponsorship))fail(400,'Choose a valid sponsorship filter.');const p={sponsorship,titles:text(body.titles,'titles',1000),location:text(body.location,'location'),workplace:body.workplace,type:body.type,salary:body.salary,unknownSalary:body.unknownSalary,excluded:text(body.excluded,'excluded companies',1000),country,currency};db.prepare('INSERT INTO preferences VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(user.id,JSON.stringify(p));return {status:200,body:{preferences:p}};}
       }
-      if(path==='/api/cv'&&method==='GET'){const cv=await cvText(user),assessment=await processCV({cv:cv.text,jobs:[]});return {status:200,body:{...cv,assessment:assessment.cv,documents:db.prepare('SELECT id,name,kind,length(bytes) AS size,created_at FROM documents WHERE user_id=? ORDER BY created_at DESC').all(user.id)}};}
+      if(path==='/api/cv'&&method==='GET'){const cv=await cvText(user),assessment=await processCV({cv:cv.text,jobs:[]}),cover=await coverText(user),coverAssessment=await processCV({coverAssessment:true,text:cover.text});return {status:200,body:{...cv,assessment:assessment.cv,coverLetter:{...cover,assessment:cover.assessment||coverAssessment},documents:db.prepare('SELECT id,name,kind,purpose,assessment_json,extraction_error,length(bytes) AS size,created_at FROM documents WHERE user_id=? ORDER BY created_at DESC,rowid DESC').all(user.id).map(d=>({...d,assessment:d.assessment_json?JSON.parse(d.assessment_json):null,assessment_json:undefined}))}};}
       if(path==='/api/cv'&&method==='PUT') {const contents=text(body.text,'CV text',100000);db.prepare('INSERT INTO cv_profiles VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET text=excluded.text,updated_at=excluded.updated_at').run(user.id,contents,iso(now()));return {status:200,body:{ok:true}};}
+      if(path==='/api/cover-letter'&&method==='PUT'){const contents=text(body.text,'cover letter text',100000),assessment=await processCV({coverAssessment:true,text:contents});db.prepare('INSERT INTO cover_profiles VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET text=excluded.text,updated_at=excluded.updated_at').run(user.id,contents,iso(now()));return {status:200,body:{assessment}};}
       if(path==='/api/documents'&&method==='POST') {
+        const purpose=body.purpose??'CV';if(!['CV','Cover letter'].includes(purpose))fail(400,'Choose CV or Cover letter.');
+        const job=body.applicationId?ownApplication(text(body.applicationId,'application ID',40,true),user):null;
         const name=text(body.name,'filename',200,true),kind=name.split('.').pop().toLowerCase();
         if(!['pdf','docx','txt'].includes(kind)||typeof body.base64!=='string'||body.base64.length>14*1024*1024||! /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(body.base64))fail(400,'Upload a PDF, DOCX or TXT up to 10 MB.');
         const bytes=Buffer.from(body.base64,'base64');if(!bytes.length||bytes.length>10*1024*1024)fail(400,'Upload a non-empty file up to 10 MB.');
         if(kind==='pdf'&&bytes.subarray(0,5).toString()!=='%PDF-'||kind==='docx'&&!bytes.subarray(0,4).equals(Buffer.from([80,75,3,4])))fail(400,'The file content does not match its extension.');
         const quota=statement('SELECT coalesce(sum(length(bytes)),0) AS size FROM documents WHERE user_id=?',user.id).size;
         if(quota+bytes.length>100*1024*1024)fail(400,'Your document storage limit is 100 MB. Remove an old upload first.');
-        const id=randomUUID();db.prepare('INSERT INTO documents VALUES (?,?,?,?,?,?)').run(id,user.id,name,kind,bytes,iso(now()));return {status:201,body:{id,name,kind,size:bytes.length}};
+        let extracted={text:'',assessment:{label:purpose==='CV'?'CV completeness':'Cover letter quality',available:false,score:null,checks:[],reason:'No readable text could be extracted.'}},extractionError='';
+        try{extracted=await processCV({extract:true,kind,base64:body.base64,purpose,job});}catch{extractionError='Unable to extract readable text. Paste reviewed text or upload a readable document; scanned PDFs need OCR.';}
+        authenticate(cookie);
+        const currentQuota=statement('SELECT coalesce(sum(length(bytes)),0) AS size FROM documents WHERE user_id=?',user.id).size;if(currentQuota+bytes.length>100*1024*1024)fail(400,'Your document storage limit is 100 MB.');
+        const id=randomUUID();transaction(()=>{db.prepare('INSERT INTO documents (id,user_id,name,kind,bytes,created_at,purpose,extracted_text,assessment_json,extraction_error) VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,user.id,name,kind,bytes,iso(now()),purpose,extracted.text,JSON.stringify(extracted.assessment),extractionError);if(body.purpose!==undefined)db.prepare(purpose==='CV'?'DELETE FROM cv_profiles WHERE user_id=?':'DELETE FROM cover_profiles WHERE user_id=?').run(user.id);});return {status:201,body:{id,name,kind,purpose,size:bytes.length,...extracted,error:extractionError}};
       }
       const doc=path.match(/^\/api\/documents\/([a-f0-9-]+)$/);
       if(doc) {const row=statement('SELECT * FROM documents WHERE id=? AND user_id=?',doc[1],user.id);if(!row)fail(404,'Document not found.');if(method==='GET')return {status:200,binary:row.bytes,name:row.name};if(method==='DELETE'){db.prepare('DELETE FROM documents WHERE id=? AND user_id=?').run(row.id,user.id);return {status:200,body:{ok:true}};}}

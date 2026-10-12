@@ -66,8 +66,21 @@ if(!base||!process.env.MILO_UI_FIXTURE)throw Error('Set MILO_UI_URL and MILO_UI_
   await page.screenshot({path:output+'/ai-settings.png',fullPage:true});
   await page.locator('[data-theme-toggle]').click();assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
   await page.screenshot({path:output+'/ai-settings-dark.png',fullPage:true});await page.locator('[data-theme-toggle]').click();
+  await page.goto(base+'/#CV%20studio');await page.locator('#cv-file').waitFor();
+  const reviewedCV='UI Review ui-review@example.com Experience: Built Python applications with SQL and reduced reporting time by 35%. Skills: Python SQL project management. Education: University degree. Delivered reliable customer reports with clear documentation, verified measurements and practical experience across multiple software delivery teams.';
+  await page.locator('#cv-file').setInputFiles({name:'review-cv.txt',mimeType:'text/plain',buffer:Buffer.from(reviewedCV)});
+  await page.getByText('review-cv.txt',{exact:true}).waitFor();await page.getByRole('heading',{name:'CV completeness: 100/100',exact:true}).waitFor();assert.equal(await page.locator('#cv-text').inputValue(),reviewedCV);
+  const coverText='Dear Hiring Manager, I am applying for the Cloud Engineer role at Example Company. I built cloud reporting services and reduced processing time by 25%. Your company mission motivates me to deliver reliable customer outcomes. Thank you for considering my application; I look forward to discussing the role and my experience.';
+  await page.locator('#cover-file').setInputFiles({name:'review-letter.txt',mimeType:'text/plain',buffer:Buffer.from(coverText)});
+  await page.getByText('review-letter.txt',{exact:true}).waitFor();assert.equal(await page.locator('#cover-text').inputValue(),coverText);assert.ok(!(await page.locator('h2').allTextContents()).some(text=>text==='Cover letter quality: Unavailable'));
+  await page.locator('#notice').evaluate(element=>element.textContent='');await page.screenshot({path:output+'/document-scores.png',fullPage:true});
+  await page.goto(base+'/#Opportunities');await page.locator('[data-suggested-role]').filter({hasText:'Cloud Engineer'}).waitFor();
+  await page.locator('[data-suggested-role]').filter({hasText:'Cloud Engineer'}).click();assert.equal(await page.locator('#search-keywords').inputValue(),'Cloud Engineer');
+  await page.locator('#notice').evaluate(element=>element.textContent='');await page.screenshot({path:output+'/suggested-roles.png',fullPage:true});
+  const preparationJob=savedJobs.applications.find(j=>j.url==='https://example.com/jobs/study');await page.goto(base+'/#Interview/'+preparationJob.id);await page.getByRole('heading',{name:'Your evidence against this job'}).waitFor();assert.ok((await page.locator('main').textContent()).includes('reduced reporting time by 35%'));
+  await page.screenshot({path:output+'/interview-preparation.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});
-  for(const route of ['Role%20preferences','Job%20toolkit/'+application.id,'AI%20settings']){
+  for(const route of ['CV%20studio','Role%20preferences','Job%20toolkit/'+application.id,'AI%20settings']){
    await page.goto(base+'/#'+route);await page.locator('h1').waitFor();
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'Mobile layout overflows: '+route);
   }

@@ -16,6 +16,22 @@ const {createService}=require('../src/server/service.cjs');
 const {handler}=require('../src/server/http.cjs');
 const origin='http://localhost:8080';
 const app={role:'Delivery Lead',company:'Example',location:'Auckland',workplace:'Hybrid',employment_type:'Permanent',source:'SEEK',url:'https://example.com/job',salary:130000,stage:'Applied',applied_at:'2026-10-08',follow_up:'',description:'Verified requirements',notes:'Private notes'};
+test('CV and cover-letter uploads immediately score and keep document types private and separate',async()=>{
+ const f=await fixture();try{
+ const cv='Person person@example.com Experience: Built Python reporting pipelines and reduced reporting time by 35%. Skills: Python SQL. Education: University degree. Delivered customer projects with reliable services, clear documentation and measurable outcomes across multiple teams.';
+ const cover='Dear Hiring Manager, I am applying for the Python Developer role at Example. I built Python reporting pipelines and reduced weekly reporting time by 35%. Your company mission motivates me to deliver reliable customer outcomes. Thank you for considering my application; I look forward to discussing the role.';
+ await f.call('PUT','/api/cv',{text:'Older reviewed CV'},f.admin.cookie);
+ const uploaded=await f.call('POST','/api/documents',{name:'cv.txt',purpose:'CV',base64:Buffer.from(cv).toString('base64')},f.admin.cookie);
+ assert.equal(uploaded.status,201);assert.equal(uploaded.body.assessment.score,100);assert.equal(uploaded.body.text,cv);
+ const letter=await f.call('POST','/api/documents',{name:'letter.txt',purpose:'Cover letter',base64:Buffer.from(cover).toString('base64')},f.admin.cookie);
+ assert.equal(letter.status,201);assert.ok(letter.body.assessment.score>50);
+ const profile=await f.call('GET','/api/cv',{},f.admin.cookie);assert.equal(profile.body.text,cv);assert.equal(profile.body.coverLetter.text,cover);assert.equal(profile.body.documents.length,2);assert.ok(profile.body.documents.every(d=>d.assessment));
+ const roles=await f.call('GET','/api/jobs/recommendations',{},f.admin.cookie);assert.ok(roles.body.roles.includes('Python Developer'));assert.deepEqual(roles.body.suggestions.find(s=>s.role==='Python Developer').sources,['CV','Cover letter']);
+ const plan=await f.call('POST','/api/interview',{job:{role:'Reporting Engineer',company:'Example',description:'Build Python reporting pipelines for finance customers.'}},f.admin.cookie);assert.ok(plan.body.requirements[0].evidence.includes('35%'));
+ const member=await f.member('documents@example.com');const empty=await f.call('GET','/api/cv',{},member.cookie);assert.equal(empty.body.coverLetter.text,'');assert.equal(empty.body.documents.length,0);
+ const unreadable=await f.call('POST','/api/documents',{name:'scan.pdf',purpose:'Cover letter',base64:Buffer.from('%PDF-unreadable').toString('base64')},f.admin.cookie);assert.equal(unreadable.status,201);assert.equal(unreadable.body.assessment.score,null);assert.ok(unreadable.body.error);
+ }finally{f.db.close();}
+});
 test('worldwide geography includes local currency and location suggestions',()=>{
  const {geography,countryFor}=require('../src/server/geography.cjs');
  assert.ok(geography().length>200);assert.equal(countryFor('india').currency,'INR');
