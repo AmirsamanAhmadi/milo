@@ -41,6 +41,11 @@ def assess(cv, jobs):
     overview = {"available": available, "score": sum(20 for _, found in checks if found) if available else None,
                 "label": "CV completeness", "checks": [{"name": name, "present": found} for name, found in checks],
                 "reason": "Add at least 30 words of readable CV text to assess your CV." if not available else "Five document checks, 20 points each; this is not a measure of employability."}
+    overview["ats"] = {"readable": available,
+                       "notes": ["Use selectable text, clear headings and a simple one-column document.",
+                                 "Keep name and contact details in the document body, not only headers or text boxes.",
+                                 "Review extracted text for missing or reordered content; visual layout is not checked here.",
+                                 "ATS products parse and search documents differently. No universal ATS pass score is calculated."]}
     fits = []
     for job in jobs:
         description = job.get("description", "")

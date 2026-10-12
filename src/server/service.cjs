@@ -3,6 +3,9 @@ const { promisify } = require('node:util');
 const derive = promisify(scrypt);
 const {createJobSearch}=require('./jobs.cjs');
 const {processCV}=require('./assessment.cjs');
+const {generateAI}=require('./ai.cjs');
+const {createVault}=require('./provider-settings.cjs');
+const codexAccount=require('./codex-account.cjs');
 const stages = ['Discovered','Ready','Applied','Recruiter screen','Assessment','Interview','Team match','Technical interview','Final round','Offer','Rejected','Withdrawn','No response'];
 const workplaces = ['Remote','Hybrid','Onsite'];
 const types = ['Permanent','Contract','Part-time','Internship'];
@@ -53,7 +56,15 @@ function applicationInput(data) {
   if(salary!==null && (!Number.isSafeInteger(salary)||salary<0||salary>10000000)) fail(400,'Enter a valid annual salary.');
   return { role:text(data.role,'role',200,true),company:text(data.company,'company',200,true),location:text(data.location??'','location'),workplace:data.workplace,employment_type:data.employment_type,source:text(data.source??'','source'),url:httpURL(data.url),salary,stage:data.stage,applied_at:date(data.applied_at,'application date'),follow_up:date(data.follow_up,'follow-up date'),description:text(data.description??'','job description',30000),notes:text(data.notes??'','notes',10000) };
 }
-function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now(), jobSearch=createJobSearch(), adzunaConfigured=Boolean(process.env.ADZUNA_APP_ID&&process.env.ADZUNA_APP_KEY), seekConfigured=Boolean(process.env.APIFY_TOKEN) }={}) {
+function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now(), jobSearch=createJobSearch(), adzunaConfigured=Boolean(process.env.ADZUNA_APP_ID&&process.env.ADZUNA_APP_KEY), seekConfigured=Boolean(process.env.APIFY_TOKEN), aiGenerator=generateAI, aiConfigured=Boolean(process.env.OPENAI_API_KEY&&process.env.OPENAI_MODEL), aiModel=process.env.OPENAI_MODEL||'', credentialVault=null }={}) {
+  let aiActive=0;
+  const vault=credentialVault||createVault();
+  function aiConfiguration(user,includeKey=false){
+    const saved=db.prepare('SELECT * FROM user_ai WHERE user_id=?').get(user.id);
+    const provider=saved?.provider||'OpenAI',model=saved?.model||(provider==='Local AI'?process.env.LOCAL_AI_MODEL:provider==='ChatGPT'?'':aiModel)||'';
+    const configured=provider==='OpenAI'?aiConfigured:provider==='My OpenAI key'?Boolean(saved?.encrypted_key&&model):provider==='Local AI'?Boolean(process.env.LOCAL_AI_URL&&model):codexAccount.status(user.id).connected;
+    return {provider,model,configured,personalKeySaved:Boolean(saved?.encrypted_key),localConfigured:Boolean(process.env.LOCAL_AI_URL),codex:codexAccount.status(user.id),...(includeKey&&provider==='My OpenAI key'&&saved?.encrypted_key?{apiKey:vault.decrypt(saved.encrypted_key)}:{}),...(includeKey&&provider==='ChatGPT'?{codexHome:codexAccount.accountHome(user.id)}:{})};
+  }
   const origin=new URL(publicURL).origin;
   const secure=new URL(publicURL).protocol==='https:';
   const statement=(sql,...args)=>db.prepare(sql).get(...args);
@@ -127,6 +138,56 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         return {status:201,body:{user:publicUser(u)},cookie:startSession(u)};
       }
       const user=authenticate(cookie);
+      if(path==='/api/ai/status'&&method==='GET')return {status:200,body:aiConfiguration(user)};
+      if(path==='/api/ai/settings'&&method==='PUT'){
+        if(!['OpenAI','My OpenAI key','Local AI','ChatGPT'].includes(body.provider))fail(400,'Choose a supported AI provider.');
+        const model=text(body.model??'','model',100),secret=text(body.apiKey??'','API key',1000);
+        const saved=statement('SELECT encrypted_key FROM user_ai WHERE user_id=?',user.id);
+        const encoded=body.removeKey?'':secret?vault.encrypt(secret):saved?.encrypted_key||'';
+        db.prepare('INSERT INTO user_ai VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET provider=excluded.provider,model=excluded.model,encrypted_key=excluded.encrypted_key').run(user.id,body.provider,model,encoded);
+        return {status:200,body:aiConfiguration(user)};
+      }
+      if(path==='/api/ai/login'&&method==='POST'){throttle('ai-login:'+user.id);try{return {status:200,body:codexAccount.start(user.id)};}catch{fail(503,'ChatGPT sign-in could not start. Try again later.');}}
+      if(path==='/api/ai/logout'&&method==='POST')return {status:200,body:codexAccount.disconnect(user.id)};
+      if(path==='/api/toolkit'&&method==='POST') {
+        const action=body.action;
+        if(!['load','assess','tailor','letter','save'].includes(action))fail(400,'Choose a valid toolkit action.');
+        const source=body.applicationId?ownApplication(text(body.applicationId,'application ID',100,true),user):body.job;
+        if(!source||typeof source!=='object'||Array.isArray(source))fail(400,'Choose a job or paste a job description.');
+        const job={role:text(source.role,'role',200,true),company:text(source.company,'company',200,true),description:text(source.description,'job description',30000,true)};
+        const key=digest(JSON.stringify(job)),cv=await cvText(user);
+        const previous=statement('SELECT * FROM job_toolkits WHERE user_id=? AND job_key=?',user.id,key);
+        const drafts={assessment:previous?.assessment?JSON.parse(previous.assessment):null,tailoredCV:previous?.tailored_cv||'',coverLetter:previous?.cover_letter||'',cvHash:previous?.cv_hash||''};
+        const currentHash=digest(cv.text),versions=drafts.cvHash.startsWith('{')?JSON.parse(drafts.cvHash):{assessment:drafts.cvHash,tailoredCV:drafts.cvHash,coverLetter:drafts.cvHash};
+        if(action==='load'){const rule=await processCV({cv:cv.text,jobs:[job]});return {status:200,body:{job,...drafts,rule:rule.fits[0],cv:rule.cv,stale:['assessment','tailoredCV','coverLetter'].some(name=>Boolean(drafts[name]&&versions[name]!==currentHash)),ai:aiConfiguration(user)}};}
+        throttle('ai:'+user.id);
+        for(const name of ['tailoredCV','coverLetter'])if(body[name]!==undefined){const edited=text(body[name],name==='tailoredCV'?'tailored CV':'cover letter',name==='tailoredCV'?100000:30000);if(edited!==drafts[name])versions[name]=currentHash;drafts[name]=edited;}
+        if(action==='save'){
+          drafts.tailoredCV=text(body.tailoredCV??drafts.tailoredCV,'tailored CV',100000);
+          drafts.coverLetter=text(body.coverLetter??drafts.coverLetter,'cover letter',30000);
+        }else{
+          const configuration=aiConfiguration(user,true);
+          if(!configuration.configured)fail(503,'Connect an AI provider in AI settings first.');
+          if(cv.text.trim().split(/\s+/).length<30)fail(400,'Save at least 30 words of readable CV text first.');
+          if(job.description.trim().split(/\s+/).length<20)fail(400,'Add a fuller job description before requesting AI.');
+          if(aiActive>=2)fail(429,'AI is busy. Try again shortly.');
+          const evidence=text(body.evidence??'','verified experience',10000),motivation=text(body.motivation??'','motivation',5000),tone=text(body.tone??'Professional','tone',30);
+          if(!['Professional','Warm','Concise'].includes(tone))fail(400,'Choose a valid tone.');
+          let generated;aiActive++;
+          try{generated=await aiGenerator({action,cv:cv.text,job,evidence,motivation,tone,name:user.name},configuration);}
+          catch{fail(502,'AI generation failed. Check provider credentials, model and availability.');}
+          finally{aiActive--;}
+          authenticate(cookie);
+          if(action==='assess')drafts.assessment={...generated,tailored_cv:'',cover_letter:'',model:configuration.model,provider:configuration.provider,createdAt:iso(now())};
+          if(action==='tailor')drafts.tailoredCV=text(generated.tailored_cv,'tailored CV',100000,true);
+          if(action==='letter')drafts.coverLetter=text(generated.cover_letter,'cover letter',30000,true);
+          versions[{assess:'assessment',tailor:'tailoredCV',letter:'coverLetter'}[action]]=currentHash;
+        }
+        drafts.cvHash=JSON.stringify(versions);
+        if(!previous&&statement('SELECT count(*) AS count FROM job_toolkits WHERE user_id=?',user.id).count>=500)fail(400,'Your job draft limit is reached.');
+        db.prepare('INSERT INTO job_toolkits VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(user_id,job_key) DO UPDATE SET job=excluded.job,assessment=excluded.assessment,tailored_cv=excluded.tailored_cv,cover_letter=excluded.cover_letter,cv_hash=excluded.cv_hash,updated_at=excluded.updated_at').run(user.id,key,JSON.stringify(job),drafts.assessment?JSON.stringify(drafts.assessment):null,drafts.tailoredCV,drafts.coverLetter,drafts.cvHash,iso(now()));
+        return {status:200,body:{job,...drafts,ai:aiConfiguration(user)}};
+      }
       if(path==='/api/jobs/providers'&&method==='GET')return {status:200,body:{providers:[...['All available','Indeed','LinkedIn','Glassdoor','Working Nomads','Arbeitnow'].map(name=>({name,available:true})),{name:'Adzuna NZ',available:adzunaConfigured},{name:'SEEK',available:seekConfigured}]}};
       if(path==='/api/jobs/search'&&method==='POST') {
         throttle('jobs:'+user.id);

@@ -20,15 +20,16 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1
 
 # Live app: server-side sessions, private records and persistent SQLite storage.
-FROM node:24-bookworm-slim AS runtime
+FROM node:24-alpine AS runtime
 ENV NODE_ENV=production PORT=8080 MILO_DATA_DIR=/data MILO_PYTHON=/opt/jobspy/bin/python
 WORKDIR /app
 COPY requirements.txt ./requirements.txt
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \
-    && python3 -m venv /opt/jobspy \
-    && /opt/jobspy/bin/pip install --no-cache-dir -r requirements.txt \
-    && rm -rf /var/lib/apt/lists/* \
+RUN npm install --prefix /opt/codex --omit=dev @openai/codex@0.162.1 \
+    && ln -s /opt/codex/node_modules/.bin/codex /usr/local/bin/codex
+RUN apk upgrade --no-cache \
+    && apk add --no-cache python3 py3-pip py3-virtualenv ca-certificates libstdc++ \
+    && python3 -m virtualenv /opt/jobspy \
+    && /opt/jobspy/bin/pip install --no-cache-dir --only-binary=:all: -r requirements.txt \
     && rm -rf /usr/local/lib/node_modules /opt/yarn* \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg \
     && mkdir -p /data && chown node:node /data && chmod 700 /data

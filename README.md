@@ -24,7 +24,7 @@ Records survive container restarts in the `milo-data` named volume. See [Contain
 - Application search/stage filters and a dashboard with pipeline/offer/follow-up counts.
 - Live job search with keyword, location and remote filters, pagination, original listing links and reviewed import into applications. Indeed, LinkedIn and Glassdoor use Python JobSpy; Working Nomads and Arbeitnow work without credentials. Adzuna NZ and SEEK/Apify require credentials. See [job discovery](docs/job-discovery.md).
 - Private PDF/DOCX/TXT uploads, authorized downloads/removal and reviewed CV text. Readable PDF/Word/TXT files can supply local CV assessments; scanned PDFs require pasted text.
-- Local CV completeness checks and per-job keyword match scores, with matched skills, missing topics and CV evidence. Scores do not predict hiring outcomes.
+- Local CV completeness checks and per-job keyword match scores, with matched skills, missing topics and CV evidence. Optional AI assessment, JD-specific CV tailoring and custom cover letters use a selected OpenAI, personal API key, local server or ChatGPT/Codex account. See [AI and ATS setup](docs/ai-and-ats.md). Scores do not predict hiring outcomes.
 - Job-specific custom cover-letter template builder, editing, persistent saving and TXT download.
 - Personal name editing, responsive layouts and light/dark mode.
 - Password changing with current-password verification and revocation of other sessions, available in **My account**.
@@ -33,7 +33,7 @@ Each user's records and documents are protected by server-side ownership checks,
 
 ## Still being built
 
-Gmail/Outlook/Live sync, additional job-board integrations, AI assessments/writing, resume rendering, interview study recommendations, watchlist refresh and advanced analytics remain planned. The design preview demonstrates those workflows with fictional data. Password recovery, member suspension, scheduled backups, restore tooling, passkeys and SSO are not implemented yet.
+Gmail/Outlook/Live sync, additional job-board integrations, advanced AI workflows, resume rendering, interview study recommendations, watchlist refresh and advanced analytics remain planned. The design preview demonstrates those workflows with fictional data. Password recovery, member suspension, scheduled backups, restore tooling, passkeys and SSO are not implemented yet.
 
 ## Design preview
 

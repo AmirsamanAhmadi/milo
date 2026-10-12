@@ -50,6 +50,16 @@ function openStore(filename) {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS applications_owner ON applications(user_id, updated_at);
+    CREATE TABLE IF NOT EXISTS job_toolkits (
+      user_id TEXT NOT NULL REFERENCES users(id), job_key TEXT NOT NULL,
+      job TEXT NOT NULL, assessment TEXT, tailored_cv TEXT NOT NULL DEFAULT '',
+      cover_letter TEXT NOT NULL DEFAULT '', cv_hash TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id,job_key)
+    );
+    CREATE TABLE IF NOT EXISTS user_ai (
+      user_id TEXT PRIMARY KEY REFERENCES users(id), provider TEXT NOT NULL,
+      model TEXT NOT NULL DEFAULT '', encrypted_key TEXT NOT NULL DEFAULT ''
+    );
     CREATE INDEX IF NOT EXISTS events_application ON stage_events(application_id, user_id);
     PRAGMA user_version=1;
   `);

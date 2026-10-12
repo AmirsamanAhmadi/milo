@@ -17,6 +17,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Test Python utilities and assessment
+        run: python -m unittest discover -s tests -p 'test_*.py'
       - name: Build and test the screen preview
         run: |
           node scripts/build-preview.cjs

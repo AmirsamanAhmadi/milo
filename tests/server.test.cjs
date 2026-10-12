@@ -78,6 +78,46 @@ test('job scores use only the signed-in owner CV and do not modify shared provid
  }finally{f.db.close();}
 });
 
+test('AI toolkit retains rule scoring and isolates assessment and writing drafts by owner',async()=>{
+ const calls=[];const f=await fixture(':memory:',{aiConfigured:true,aiModel:'test-model',aiGenerator:async input=>{
+  calls.push(input);return {score:75,summary:'Evidence-based review',strengths:['Python in CV'],gaps:['Kubernetes'],recommendations:['Verify requirements'],ats_notes:['Use clear headings'],tailored_cv:input.action==='tailor'?'Verified tailored CV':'',cover_letter:input.action==='letter'?'Custom letter for Example':''};
+ }});try{
+ const member=await f.member('ai-member@example.com');
+ const cv='Alex alex@example.com Experience delivered Python SQL Docker systems and improved reporting by 25%. Skills Python SQL Docker. Education university degree. Worked in a team to maintain services and explain technical results clearly.';
+ await f.call('PUT','/api/cv',{text:cv},f.admin.cookie);
+ const job={role:'Engineer',company:'Example',description:'We need Python SQL Docker and Kubernetes to build reliable services. You will work with a team and maintain systems, document your work and review code.'};
+ const invoke=(action,cookie=f.admin.cookie,extra={})=>f.call('POST','/api/toolkit',{action,job,...extra},cookie);
+ assert.equal((await invoke('assess',member.cookie)).status,400);
+ const loaded=await invoke('load');assert.equal(loaded.body.rule.score,75);
+ assert.equal((await invoke('assess')).body.assessment.score,75);
+ assert.equal((await invoke('tailor')).body.tailoredCV,'Verified tailored CV');
+ assert.equal((await invoke('letter')).body.coverLetter,'Custom letter for Example');
+ assert.equal((await invoke('load',member.cookie)).body.assessment,null);
+ assert.equal((await invoke('load',member.cookie)).body.tailoredCV,'');
+ await invoke('save',f.admin.cookie,{tailoredCV:'Reviewed edit',coverLetter:'Reviewed letter'});
+ assert.equal((await invoke('load')).body.tailoredCV,'Reviewed edit');
+ await invoke('assess',f.admin.cookie,{tailoredCV:'Unsaved edit preserved',coverLetter:'Unsaved letter preserved'});
+ assert.equal((await invoke('load')).body.tailoredCV,'Unsaved edit preserved');
+ assert.equal((await f.call('GET','/api/cv',{},f.admin.cookie)).body.text,cv);
+ assert.equal(calls.length,4);
+ const created=await f.call('POST','/api/applications',app,f.admin.cookie);
+ assert.equal((await invoke('assess',member.cookie,{applicationId:created.body.application.id})).status,404);
+ }finally{f.db.close();}
+});
+
+test('personal AI keys are encrypted and are never returned to members',async()=>{
+ const {createVault}=require('../src/server/provider-settings.cjs'),directory=fs.mkdtempSync(path.join(os.tmpdir(),'milo-vault-'));
+ const f=await fixture(':memory:',{credentialVault:createVault(directory)});try{
+ const secret=randomBytes(32).toString('hex');
+ const response=await f.call('PUT','/api/ai/settings',{provider:'My OpenAI key',model:'test-model',apiKey:secret},f.admin.cookie);
+ assert.equal(response.body.configured,true);assert.ok(!JSON.stringify(response.body).includes(secret));
+ assert.ok(!f.db.prepare('SELECT encrypted_key FROM user_ai').get().encrypted_key.includes(secret));
+ const member=await f.member('key-member@example.com');assert.equal((await f.call('GET','/api/ai/status',{},member.cookie)).body.personalKeySaved,false);
+ await f.call('PUT','/api/ai/settings',{provider:'My OpenAI key',model:'test-model',removeKey:true},f.admin.cookie);
+ assert.equal((await f.call('GET','/api/ai/status',{},f.admin.cookie)).body.configured,false);
+ }finally{f.db.close();fs.rmSync(directory,{recursive:true,force:true});}
+});
+
 test('browser signup creates only the first administrator and signs them in',async()=>{
  const db=openStore(':memory:');try{
  const service=createService(db,{publicURL:origin});
@@ -85,7 +125,7 @@ test('browser signup creates only the first administrator and signs them in',asy
  assert.equal((await call('GET')).body.available,true);
  const credentials={email:'signup@example.com',name:'First admin',password:memberPassword()};
  assert.equal((await call('POST',credentials,'https://foreign.example')).status,403);
- assert.equal((await call('POST',{...credentials,password:'short'})).status,400);
+ assert.equal((await call('POST',{...credentials,password:randomBytes(4).toString('hex')})).status,400);
  const results=await Promise.all([call('POST',credentials),call('POST',{...credentials,email:'second@example.com'})]);
  assert.equal(results.filter(r=>r.status===201).length,1);
  assert.equal(results.filter(r=>r.status===409).length,1);
@@ -110,12 +150,12 @@ test('signup page confirms passwords and opens the workspace after creating an a
  await new Promise(resolve=>setImmediate(resolve));
  await vm.runInContext("render('Signup')",context);
  assert.ok(element('#app').innerHTML.includes('id="signup-form"'));
- const password=memberPassword();
- for(const [id,value] of Object.entries({'signup-name':'Browser admin','signup-email':'browser@example.com','signup-password':password,'signup-confirm':'mismatch'}))element('#'+id).value=value;
+ const signupSecret=randomBytes(24).toString('hex');
+ for(const [id,value] of Object.entries({'signup-name':'Browser admin','signup-email':'browser@example.com','signup-password':signupSecret,'signup-confirm':memberPassword()}))element('#'+id).value=value;
  await element('#signup-form').listeners.submit({preventDefault(){}});
  assert.equal(element('#notice').textContent,'Passwords do not match.');
  assert.equal(db.prepare('SELECT count(*) AS count FROM users').get().count,0);
- element('#signup-confirm').value=password;
+ element('#signup-confirm').value=signupSecret;
  await element('#signup-form').listeners.submit({preventDefault(){}});
  assert.ok(element('#app').innerHTML.includes('Welcome, Browser.'));
  assert.equal(db.prepare('SELECT role FROM users').get().role,'admin');
@@ -234,7 +274,7 @@ test('revocation, secure cookies, authentication throttling and date validation'
  }finally{f.db.close();}
 });
 test('live frontend saves applications through the real service and renders escaped content',async()=>{
- const vm=require('node:vm');const f=await fixture(':memory:',{jobSearch:async()=>({jobs:[{role:'<script>Live engineer</script>',company:'Live employer',location:'Berlin',remote:true,url:'https://example.com/live-job',source:'Arbeitnow',description:'Verified job description'}],page:1,hasMore:false,fetchedAt:new Date().toISOString()})});try{
+ const vm=require('node:vm');const f=await fixture(':memory:',{aiConfigured:true,aiModel:'test-model',aiGenerator:async()=>({score:80,summary:'<script>AI evidence</script>',strengths:['Python experience'],gaps:['Verify Kubernetes'],recommendations:['Review'],ats_notes:['Clear headings'],tailored_cv:'Verified tailored CV',cover_letter:'Custom cover letter'}),jobSearch:async()=>({jobs:[{role:'<script>Live engineer</script>',company:'Live employer',location:'Berlin',remote:true,url:'https://example.com/live-job',source:'Arbeitnow',description:'Verified job description'}],page:1,hasMore:false,fetchedAt:new Date().toISOString()})});try{
  const elements=new Map(),events={};const element=id=>{if(!elements.has(id))elements.set(id,{innerHTML:'',value:'',textContent:'',dataset:{},style:{},listeners:{},addEventListener(k,fn){this.listeners[k]=fn},querySelector(){return {disabled:false}},reset(){}});return elements.get(id);};
  let cookie=f.admin.cookie;
  const doc={querySelector:element,querySelectorAll:()=>[],documentElement:{dataset:{}},addEventListener(k,fn){events[k]=fn}};
@@ -247,7 +287,7 @@ test('live frontend saves applications through the real service and renders esca
  await run("render('Applications')");assert.ok(element('#app').innerHTML.includes('&lt;script&gt;Private role'));assert.ok(!element('#app').innerHTML.includes('<script>Private role'));
  await run("render('My account')");assert.ok(element('#app').innerHTML.includes('id="password-form"'));
  const newPassword=memberPassword(),previousCookie=cookie;
- element('#password-current').value=adminPassword;element('#password-new').value=newPassword;element('#password-confirm').value='mismatch';
+ element('#password-current').value=adminPassword;element('#password-new').value=newPassword;element('#password-confirm').value=memberPassword();
  await element('#password-form').listeners.submit({preventDefault(){}});
  assert.equal(element('#notice').textContent,'New passwords do not match.');assert.equal(cookie,previousCookie);
  element('#password-confirm').value=newPassword;
@@ -277,6 +317,16 @@ test('live frontend saves applications through the real service and renders esca
  assert.equal(await run('searchSettings.remote'),true);
  assert.ok(element('#job-search-results').innerHTML.includes('Live engineer'));
  assert.equal(element('#job-search-status').textContent,'Search complete.');
+ const reviewedCV='Alex alex@example.com Experience Python SQL Docker and improved reporting by 25%. Skills Python SQL Docker. Education university degree. Worked with a team to build reliable services and explain technical results clearly to colleagues.';
+ await f.call('PUT','/api/cv',{text:reviewedCV},cookie);
+ const jd='We need Python SQL Docker Kubernetes to build reliable services and collaborate with teams. The engineer will review code and maintain production systems with clear documentation and regular testing.';
+ await run('toolkitJob='+JSON.stringify({role:'Engineer',company:'Example',description:jd}));
+ await run("render('Job toolkit')");
+ element('#toolkit-role').value='Engineer';element('#toolkit-company').value='Example';element('#toolkit-jd').value=jd;element('#toolkit-tone').value='Professional';element('#toolkit-evidence').value='';element('#toolkit-motivation').value='';
+ await events.click({target:{closest:selector=>selector==='[data-toolkit-action]'?{dataset:{toolkitAction:'assess'}}:null}});
+ assert.ok(element('#app').innerHTML.includes('AI suitability: 80/100'));
+ assert.ok(element('#app').innerHTML.includes('&lt;script&gt;AI evidence'));
+ assert.ok(!element('#app').innerHTML.includes('<script>AI evidence'));
  const member=await f.member('frontend-member@example.com');cookie=member.cookie;await run('loadSession()');await run("render('Today')");assert.ok(!element('#app').innerHTML.includes('data-route="Members"'));assert.ok(!element('#app').innerHTML.includes('data-route="Invitations"'));
  await run("render('Invitations')");assert.ok(element('#app').innerHTML.includes('Administrator access is required.'));
  }finally{f.db.close();}

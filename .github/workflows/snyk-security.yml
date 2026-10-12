@@ -28,12 +28,16 @@ jobs:
         if: ${{ !cancelled() && steps.configuration.outputs.enabled == 'true' }}
       - name: Scan code
         if: ${{ !cancelled() && steps.configuration.outputs.enabled == 'true' }}
-        run: snyk code test
+        run: snyk code test --sarif-file-output=${{ runner.temp }}/snyk-code.sarif
       - name: Scan dependencies when present
         if: ${{ !cancelled() && steps.configuration.outputs.enabled == 'true' }}
         shell: bash
         run: |
-          if [ -f package-lock.json ] || [ -f yarn.lock ] || [ -f pnpm-lock.yaml ]; then
+          if [ -f requirements.txt ]; then
+            python -m venv /tmp/milo-security
+            /tmp/milo-security/bin/pip install -r requirements.txt
+            snyk test --file=requirements.txt --package-manager=pip --command=/tmp/milo-security/bin/python
+          elif [ -f package-lock.json ] || [ -f yarn.lock ] || [ -f pnpm-lock.yaml ]; then
             snyk test --all-projects
           else
             echo 'No supported dependency lockfile; dependency scan not applicable.' >> "$GITHUB_STEP_SUMMARY"
@@ -57,3 +61,10 @@ jobs:
           else
             echo 'No Dockerfile; container scan not applicable.' >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Preserve code findings for diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snyk-code-findings
+          path: ${{ runner.temp }}/snyk-code.sarif
+          if-no-files-found: ignore
