@@ -12,7 +12,7 @@ docker compose up --build -d
 docker compose exec milo node scripts/setup-admin.cjs
 ```
 
-Create your first administrator interactively, then open https://localhost:8080 and sign in. There are no default credentials or public registration. Administrators create member invitation links through **Invitations**; links expire after 72 hours and can be accepted only once.
+Open https://localhost:8080/#Signup to create your first administrator in the browser; signup signs you in automatically. The interactive setup command is an alternative. Signup closes as soon as any account exists. There are no default credentials. Administrators create member invitation links through **Invitations**; links expire after 72 hours and can be accepted only once.
 
 Records survive container restarts in the `milo-data` named volume. See [Container setup](docs/containers.md) for server origins, ports, backups and the optional preview.
 
@@ -22,8 +22,9 @@ Records survive container restarts in the `milo-data` named volume. See [Contain
 - Administrator-only member listing and invitation creation/revocation.
 - Private application records: role, company, location, work arrangement, employment type, annual NZD salary, source URL, description, notes, dates and stage history.
 - Application search/stage filters and a dashboard with pipeline/offer/follow-up counts.
-- Saved role preferences, applied to saved openings; no live job discovery yet.
-- Private PDF/DOCX/TXT uploads, authorized downloads/removal and reviewed CV text. TXT can fill the editor; PDF/Word extraction remains pending.
+- Live job search with keyword, location and remote filters, pagination, original listing links and reviewed import into applications. Indeed, LinkedIn and Glassdoor use Python JobSpy; Working Nomads and Arbeitnow work without credentials. Adzuna NZ and SEEK/Apify require credentials. See [job discovery](docs/job-discovery.md).
+- Private PDF/DOCX/TXT uploads, authorized downloads/removal and reviewed CV text. Readable PDF/Word/TXT files can supply local CV assessments; scanned PDFs require pasted text.
+- Local CV completeness checks and per-job keyword match scores, with matched skills, missing topics and CV evidence. Scores do not predict hiring outcomes.
 - Job-specific custom cover-letter template builder, editing, persistent saving and TXT download.
 - Personal name editing, responsive layouts and light/dark mode.
 - Password changing with current-password verification and revocation of other sessions, available in **My account**.
@@ -32,7 +33,7 @@ Each user's records and documents are protected by server-side ownership checks,
 
 ## Still being built
 
-Gmail/Outlook/Live sync, job-board extraction, AI assessments/writing, resume rendering, interview study recommendations, watchlist refresh and advanced analytics remain planned. The design preview demonstrates those workflows with fictional data. Password recovery, member suspension, scheduled backups, restore tooling, passkeys and SSO are not implemented yet.
+Gmail/Outlook/Live sync, additional job-board integrations, AI assessments/writing, resume rendering, interview study recommendations, watchlist refresh and advanced analytics remain planned. The design preview demonstrates those workflows with fictional data. Password recovery, member suspension, scheduled backups, restore tooling, passkeys and SSO are not implemented yet.
 
 ## Design preview
 
@@ -58,7 +59,7 @@ All checks run in the Docker build:
 docker build --target build -t milo-checks .
 ```
 
-For local checks, Node.js 24 or newer is required; there are no package dependencies to install:
+For local checks, Node.js 24 or newer is required; there are no Node package dependencies to install. Live JobSpy searches require the Python dependencies in `requirements.txt`:
 
 ```sh
 npm test
@@ -72,4 +73,4 @@ Tests check invitations, authentication, ownership isolation, persistent storage
 Local TLS uses a disposable self-signed certificate valid for 30 days. Trust `certs/cert.pem` in your local browser before signing in. The generator preserves existing certificates. For production, use a trusted certificate and protect its private key with file permissions that allow only the operator and container user (UID 1000) to read it. Never commit TLS keys. Set `MILO_TLS_KEY` and `MILO_TLS_CERT` for direct Node execution.
 
 
-Backup and local TLS setup now use Python's standard library (Python 3.10+), with no pip dependencies. The container includes Python. The live service, administrator setup, browser interface and preview generator retain JavaScript. Legacy backup and shell TLS commands remain available for compatibility. Python backups refuse to overwrite existing files; choose a fresh destination each time.
+Backup and local TLS setup now use Python's standard library (Python 3.10+), with no additional pip dependencies; live JobSpy search uses the pinned package in requirements.txt. The container includes Python. The live service, administrator setup, browser interface and preview generator retain JavaScript. Legacy backup and shell TLS commands remain available for compatibility. Python backups refuse to overwrite existing files; choose a fresh destination each time.

@@ -10,3 +10,4 @@ data/
 certs/
 __pycache__/
 *.pyc
+.venv/

@@ -1,6 +1,8 @@
 const { randomBytes, randomUUID, createHash, scrypt, timingSafeEqual } = require('node:crypto');
 const { promisify } = require('node:util');
 const derive = promisify(scrypt);
+const {createJobSearch}=require('./jobs.cjs');
+const {processCV}=require('./assessment.cjs');
 const stages = ['Discovered','Ready','Applied','Recruiter screen','Assessment','Interview','Team match','Technical interview','Final round','Offer','Rejected','Withdrawn','No response'];
 const workplaces = ['Remote','Hybrid','Onsite'];
 const types = ['Permanent','Contract','Part-time','Internship'];
@@ -51,7 +53,7 @@ function applicationInput(data) {
   if(salary!==null && (!Number.isSafeInteger(salary)||salary<0||salary>10000000)) fail(400,'Enter a valid annual salary.');
   return { role:text(data.role,'role',200,true),company:text(data.company,'company',200,true),location:text(data.location??'','location'),workplace:data.workplace,employment_type:data.employment_type,source:text(data.source??'','source'),url:httpURL(data.url),salary,stage:data.stage,applied_at:date(data.applied_at,'application date'),follow_up:date(data.follow_up,'follow-up date'),description:text(data.description??'','job description',30000),notes:text(data.notes??'','notes',10000) };
 }
-function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now() }={}) {
+function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now(), jobSearch=createJobSearch(), adzunaConfigured=Boolean(process.env.ADZUNA_APP_ID&&process.env.ADZUNA_APP_KEY), seekConfigured=Boolean(process.env.APIFY_TOKEN) }={}) {
   const origin=new URL(publicURL).origin;
   const secure=new URL(publicURL).protocol==='https:';
   const statement=(sql,...args)=>db.prepare(sql).get(...args);
@@ -75,6 +77,14 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
     if(!row) fail(404,'Application not found.');
     return row;
   }
+  async function cvText(user){
+    const reviewed=statement('SELECT text FROM cv_profiles WHERE user_id=?',user.id)?.text||'';
+    if(reviewed.trim())return {text:reviewed,source:'Reviewed text'};
+    const document=statement('SELECT kind,bytes,name FROM documents WHERE user_id=? ORDER BY created_at DESC LIMIT 1',user.id);
+    if(!document)return {text:'',source:''};
+    try{const result=await processCV({extract:true,kind:document.kind,base64:Buffer.from(document.bytes).toString('base64')});return {text:result.text,source:document.name};}
+    catch{return {text:'',source:document.name,error:'Unable to extract readable text. Paste your CV text below. Scanned PDFs need OCR.'};}
+  }
   async function bootstrap({email:address,name,password:secret}) {
     if(statement('SELECT id FROM users LIMIT 1')) fail(409,'An administrator already exists. Bootstrap is disabled.');
     const normalized=email(address),displayName=text(name,'name',100,true),encoded=await hashPassword(secret);
@@ -93,6 +103,13 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
       if(!['GET','POST','PUT','DELETE'].includes(method))fail(405,'Method not supported.');
       if(method!=='GET' && requestOrigin!==origin)fail(403,'Request origin was not accepted.');
       if(!body||typeof body!=='object'||Array.isArray(body))fail(400,'Use a JSON object.');
+      if(path==='/api/signup'&&method==='GET')return {status:200,body:{available:!statement('SELECT id FROM users LIMIT 1')}};
+      if(path==='/api/signup'&&method==='POST') {
+        throttle(ip);
+        const created=await bootstrap(body);
+        const u=statement('SELECT * FROM users WHERE id=?',created.id);
+        return {status:201,body:{user:publicUser(u)},cookie:startSession(u)};
+      }
       if(path==='/api/login'&&method==='POST') {
         throttle(ip);const address=email(body.email);
         const u=statement('SELECT * FROM users WHERE email=?',address);
@@ -110,6 +127,28 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         return {status:201,body:{user:publicUser(u)},cookie:startSession(u)};
       }
       const user=authenticate(cookie);
+      if(path==='/api/jobs/providers'&&method==='GET')return {status:200,body:{providers:[...['All available','Indeed','LinkedIn','Glassdoor','Working Nomads','Arbeitnow'].map(name=>({name,available:true})),{name:'Adzuna NZ',available:adzunaConfigured},{name:'SEEK',available:seekConfigured}]}};
+      if(path==='/api/jobs/search'&&method==='POST') {
+        throttle('jobs:'+user.id);
+        const provider=body.provider;
+        if(!['All available','Indeed','LinkedIn','Glassdoor','Working Nomads','Arbeitnow','Adzuna NZ','SEEK'].includes(provider))fail(400,'Choose a valid job source.');
+        if(provider==='SEEK'&&!seekConfigured)fail(503,'SEEK requires an administrator Apify token.');
+        if(provider==='Adzuna NZ'&&!adzunaConfigured)fail(503,'New Zealand search requires Adzuna credentials. Ask your administrator to configure them.');
+        const query=text(body.query??'','search keywords',200),location=text(body.location??'','search location',200),page=body.page??1;
+        const country=body.country??'new zealand';
+        if(!['new zealand','australia','united kingdom','usa'].includes(country))fail(400,'Choose a supported country.');
+        if(provider==='SEEK'&&(!['new zealand','australia'].includes(country)||page!==1||body.remote))fail(400,'SEEK supports Australia/New Zealand, one page and no remote-only filter.');
+        if(['All available','Indeed','LinkedIn','Glassdoor'].includes(provider)&&!query)fail(400,'Enter search keywords for job-board searches.');
+        if(!Number.isInteger(page)||page<1||page>10||typeof body.remote!=='boolean')fail(400,'Choose valid search filters.');
+        let result;
+        try{result=await jobSearch({provider,query,location,page,remote:body.remote,country});}
+        catch{fail(502,'The job provider is unavailable. Try again later.');}
+        const cv=await cvText(user);
+        let assessment;
+        try{assessment=await processCV({cv:cv.text,jobs:result.jobs});}
+        catch{fail(503,'CV assessment is unavailable. Try again later.');}
+        return {status:200,body:{...result,cv:assessment.cv,cvSource:cv.source,cvError:cv.error,jobs:result.jobs.map((job,index)=>({...job,fit:assessment.fits[index]}))}};
+      }
       if(path==='/api/me/password'&&method==='PUT') {
         throttle('password:'+user.id);
         if(!await verifyPassword(body.currentPassword,user.password_hash))fail(400,'Current password is incorrect.');
@@ -158,7 +197,7 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         if(method==='GET')return {status:200,body:{preferences:JSON.parse(statement('SELECT data FROM preferences WHERE user_id=?',user.id)?.data||JSON.stringify(defaultPreferences))}};
         if(method==='PUT') {if(!['Any',...workplaces].includes(body.workplace)||!['Any',...types].includes(body.type)||typeof body.unknownSalary!=='boolean'||!Number.isSafeInteger(body.salary)||body.salary<0||body.salary>10000000)fail(400,'Choose valid preferences.');const p={titles:text(body.titles,'titles',1000),location:text(body.location,'location'),workplace:body.workplace,type:body.type,salary:body.salary,unknownSalary:body.unknownSalary,excluded:text(body.excluded,'excluded companies',1000)};db.prepare('INSERT INTO preferences VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(user.id,JSON.stringify(p));return {status:200,body:{preferences:p}};}
       }
-      if(path==='/api/cv'&&method==='GET')return {status:200,body:{text:statement('SELECT text FROM cv_profiles WHERE user_id=?',user.id)?.text||'',documents:db.prepare('SELECT id,name,kind,length(bytes) AS size,created_at FROM documents WHERE user_id=? ORDER BY created_at DESC').all(user.id)}};
+      if(path==='/api/cv'&&method==='GET'){const cv=await cvText(user),assessment=await processCV({cv:cv.text,jobs:[]});return {status:200,body:{...cv,assessment:assessment.cv,documents:db.prepare('SELECT id,name,kind,length(bytes) AS size,created_at FROM documents WHERE user_id=? ORDER BY created_at DESC').all(user.id)}};}
       if(path==='/api/cv'&&method==='PUT') {const contents=text(body.text,'CV text',100000);db.prepare('INSERT INTO cv_profiles VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET text=excluded.text,updated_at=excluded.updated_at').run(user.id,contents,iso(now()));return {status:200,body:{ok:true}};}
       if(path==='/api/documents'&&method==='POST') {
         const name=text(body.name,'filename',200,true),kind=name.split('.').pop().toLowerCase();

@@ -16,14 +16,112 @@ const {createService}=require('../src/server/service.cjs');
 const {handler}=require('../src/server/http.cjs');
 const origin='http://localhost:8080';
 const app={role:'Delivery Lead',company:'Example',location:'Auckland',workplace:'Hybrid',employment_type:'Permanent',source:'SEEK',url:'https://example.com/job',salary:130000,stage:'Applied',applied_at:'2026-10-08',follow_up:'',description:'Verified requirements',notes:'Private notes'};
-async function fixture(filename=':memory:') {
- const db=openStore(filename);let time=Date.now();const service=createService(db,{publicURL:origin,now:()=>time});
+async function fixture(filename=':memory:',serviceOptions={}) {
+ const db=openStore(filename);let time=Date.now();const service=createService(db,{publicURL:origin,now:()=>time,...serviceOptions});
  await service.bootstrap({email:'admin@example.com',name:'Admin',password:adminPassword});
  const call=(method,p,body={},cookie='',extra={})=>service.dispatch({method,path:p,body,cookie,requestOrigin:origin,...extra});
  const admin=await call('POST','/api/login',{email:'admin@example.com',password:adminPassword});
  async function member(email){const inv=await call('POST','/api/admin/invitations',{email},admin.cookie);const token=new URL(inv.body.url).hash.slice(8);const accepted=await call('POST','/api/invitations/accept',{token,name:email,password:memberPassword()});assert.equal(accepted.status,201);return {cookie:accepted.cookie,token};}
  return {db,service,call,admin,member,advance:ms=>{time+=ms;}};
 }
+test('live job searches share a bounded cache and filter provider pages',async()=>{
+ const {createJobSearch}=require('../src/server/jobs.cjs');let requests=0,time=0;
+ const search=createJobSearch({now:()=>time,fetchJobs:async()=>{requests++;return {jobs:[{role:'Engineer',company:'Example',description:'Python',location:'Berlin',remote:true},{role:'Designer',company:'Other',description:'Design',location:'Paris',remote:false}],hasMore:true};}});
+ const settings={provider:'Arbeitnow',query:'python',location:'',remote:true,page:1};
+ const results=await Promise.all([search(settings),search({...settings,query:'design',remote:false})]);
+ assert.equal(requests,1);assert.equal(results[0].jobs.length,1);assert.equal(results[1].jobs[0].role,'Designer');
+ assert.equal((await search({...settings,location:'Auckland'})).jobs.length,0);assert.equal(requests,1);
+ time=16*60000;await search(settings);assert.equal(requests,2);
+});
+
+test('combined job search retains successful sources and reports failures without duplicating URLs',async()=>{
+ const {createJobSearch}=require('../src/server/jobs.cjs');
+ const search=createJobSearch({fetchJobs:async settings=>{
+  if(settings.provider==='Glassdoor')throw Error('Blocked');
+  return {jobs:[{role:'Engineer',company:'Example',description:'Python',location:'Auckland',remote:true,url:'https://example.com/job',source:settings.provider}],hasMore:false};
+ }});
+ const result=await search({provider:'All available',query:'engineer',location:'',remote:false,page:1,country:'new zealand'});
+ assert.equal(result.jobs.length,1);assert.ok(result.warnings.some(w=>w.includes('Glassdoor')));
+});
+
+test('live search requires authentication and validates sources and configuration',async()=>{
+ const db=openStore(':memory:');try{
+ let requests=0;const service=createService(db,{publicURL:origin,adzunaConfigured:false,jobSearch:async()=>{requests++;return {jobs:[]};}});
+ await service.bootstrap({email:'jobs@example.com',name:'Jobs',password:adminPassword});
+ const login=await service.dispatch({method:'POST',path:'/api/login',requestOrigin:origin,body:{email:'jobs@example.com',password:adminPassword}});
+ const call=(body,cookie=login.cookie,requestOrigin=origin)=>service.dispatch({method:'POST',path:'/api/jobs/search',body,cookie,requestOrigin});
+ const settings={provider:'Arbeitnow',query:'Python',location:'',remote:false,page:1};
+ assert.equal((await call(settings,'')).status,401);
+ assert.equal((await call(settings,login.cookie,'https://foreign.example')).status,403);
+ assert.equal((await call({...settings,provider:'Unknown'})).status,400);
+ assert.equal((await call({...settings,page:0})).status,400);
+ assert.equal((await call({...settings,provider:'Adzuna NZ'})).status,503);
+ assert.equal((await call(settings)).status,200);assert.equal(requests,1);
+ }finally{db.close();}
+});
+
+test('job scores use only the signed-in owner CV and do not modify shared provider results',async()=>{
+ const shared={jobs:[{role:'Engineer',description:'We need Python SQL Docker and Kubernetes to build services. You will review code and collaborate with teams to maintain reliable systems and document your work.',url:'https://example.com/job',company:'Example',source:'Indeed'}]};
+ const f=await fixture(':memory:',{jobSearch:async()=>shared});try{
+ const member=await f.member('score-member@example.com');
+ const cv='Alex alex@example.com Experience: Delivered Python projects and improved reporting by 25%. Skills: Python SQL Docker. Education: University degree. Built reliable services with teams and communicated clearly with colleagues throughout the project lifecycle.';
+ await f.call('PUT','/api/cv',{text:cv},f.admin.cookie);
+ const settings={provider:'Indeed',query:'engineer',location:'',remote:false};
+ const admin=await f.call('POST','/api/jobs/search',settings,f.admin.cookie);
+ const other=await f.call('POST','/api/jobs/search',settings,member.cookie);
+ assert.equal(admin.body.jobs[0].fit.score,75);
+ assert.equal(other.body.jobs[0].fit.score,null);
+ assert.equal(other.body.cv.available,false);
+ assert.equal(shared.jobs[0].fit,undefined);
+ assert.ok(!JSON.stringify(other.body).includes('alex@example.com'));
+ const studio=await f.call('GET','/api/cv',{},f.admin.cookie);assert.equal(studio.body.assessment.score,100);
+ }finally{f.db.close();}
+});
+
+test('browser signup creates only the first administrator and signs them in',async()=>{
+ const db=openStore(':memory:');try{
+ const service=createService(db,{publicURL:origin});
+ const call=(method,body={},requestOrigin=origin)=>service.dispatch({method,path:'/api/signup',body,requestOrigin});
+ assert.equal((await call('GET')).body.available,true);
+ const credentials={email:'signup@example.com',name:'First admin',password:memberPassword()};
+ assert.equal((await call('POST',credentials,'https://foreign.example')).status,403);
+ assert.equal((await call('POST',{...credentials,password:'short'})).status,400);
+ const results=await Promise.all([call('POST',credentials),call('POST',{...credentials,email:'second@example.com'})]);
+ assert.equal(results.filter(r=>r.status===201).length,1);
+ assert.equal(results.filter(r=>r.status===409).length,1);
+ const created=results.find(r=>r.status===201);assert.equal(created.body.user.role,'admin');
+ assert.match(created.cookie,/milo_session=/);
+ assert.equal((await service.dispatch({path:'/api/me',cookie:created.cookie})).status,200);
+ assert.equal((await call('GET')).body.available,false);
+ assert.equal((await call('POST',credentials)).status,409);
+ assert.equal(db.prepare('SELECT count(*) AS count FROM users').get().count,1);
+ }finally{db.close();}
+});
+
+test('signup page confirms passwords and opens the workspace after creating an account',async()=>{
+ const vm=require('node:vm'),db=openStore(':memory:');try{
+ const service=createService(db,{publicURL:origin}),elements=new Map();let cookie='';
+ const element=id=>{if(!elements.has(id))elements.set(id,{innerHTML:'',value:'',textContent:'',dataset:{},listeners:{},addEventListener(k,fn){this.listeners[k]=fn;},querySelector(){return {disabled:false};},reset(){}});return elements.get(id);};
+ const context=vm.createContext({document:{querySelector:element,querySelectorAll:()=>[],documentElement:{dataset:{}},addEventListener(){}},location:{hash:'#Signup'},history:{replaceState(){}},window:{scrollTo(){},addEventListener(){}},localStorage:{getItem(){}},setTimeout:()=>1,clearTimeout(){},URL,fetch:async(url,opts={})=>{
+  const response=await service.dispatch({method:opts.method||'GET',path:url,body:opts.body?JSON.parse(opts.body):{},cookie,requestOrigin:origin});if(response.cookie)cookie=response.cookie;
+  return {ok:response.status<400,status:response.status,json:async()=>response.body};
+ }});
+ vm.runInContext(fs.readFileSync('src/live/app.js','utf8'),context);
+ await new Promise(resolve=>setImmediate(resolve));
+ await vm.runInContext("render('Signup')",context);
+ assert.ok(element('#app').innerHTML.includes('id="signup-form"'));
+ const password=memberPassword();
+ for(const [id,value] of Object.entries({'signup-name':'Browser admin','signup-email':'browser@example.com','signup-password':password,'signup-confirm':'mismatch'}))element('#'+id).value=value;
+ await element('#signup-form').listeners.submit({preventDefault(){}});
+ assert.equal(element('#notice').textContent,'Passwords do not match.');
+ assert.equal(db.prepare('SELECT count(*) AS count FROM users').get().count,0);
+ element('#signup-confirm').value=password;
+ await element('#signup-form').listeners.submit({preventDefault(){}});
+ assert.ok(element('#app').innerHTML.includes('Welcome, Browser.'));
+ assert.equal(db.prepare('SELECT role FROM users').get().role,'admin');
+ }finally{db.close();}
+});
+
 test('password changes require current credentials and revoke only the owner sessions',async()=>{
  const f=await fixture();try {
  const other=await f.member('other@example.com');
@@ -136,7 +234,7 @@ test('revocation, secure cookies, authentication throttling and date validation'
  }finally{f.db.close();}
 });
 test('live frontend saves applications through the real service and renders escaped content',async()=>{
- const vm=require('node:vm');const f=await fixture();try{
+ const vm=require('node:vm');const f=await fixture(':memory:',{jobSearch:async()=>({jobs:[{role:'<script>Live engineer</script>',company:'Live employer',location:'Berlin',remote:true,url:'https://example.com/live-job',source:'Arbeitnow',description:'Verified job description'}],page:1,hasMore:false,fetchedAt:new Date().toISOString()})});try{
  const elements=new Map(),events={};const element=id=>{if(!elements.has(id))elements.set(id,{innerHTML:'',value:'',textContent:'',dataset:{},style:{},listeners:{},addEventListener(k,fn){this.listeners[k]=fn},querySelector(){return {disabled:false}},reset(){}});return elements.get(id);};
  let cookie=f.admin.cookie;
  const doc={querySelector:element,querySelectorAll:()=>[],documentElement:{dataset:{}},addEventListener(k,fn){events[k]=fn}};
@@ -159,6 +257,26 @@ test('live frontend saves applications through the real service and renders esca
  assert.equal((await f.call('GET','/api/me',{},cookie)).status,200);
  assert.equal((await f.call('GET','/api/me',{},previousCookie)).status,401);
  f.admin.cookie=cookie;
+ await run("render('Opportunities')");
+ element('#search-provider').value='Arbeitnow';element('#search-keywords').value='engineer';element('#search-location').value='';element('#search-country').value='new zealand';element('#search-remote').checked=false;
+ await element('#job-search-form').listeners.submit({preventDefault(){}});
+ assert.ok(element('#job-search-results').innerHTML.includes('&lt;script&gt;Live engineer'));
+ assert.ok(!element('#job-search-results').innerHTML.includes('<script>Live engineer'));
+ await events.click({target:{closest:selector=>selector==='[data-import-job]'?{dataset:{importJob:'0'}}:null}});
+ await run("render('New application')");
+ assert.ok(element('#app').innerHTML.includes('Verified job description'));
+ assert.ok(element('#app').innerHTML.includes('https://example.com/live-job'));
+ await run("render('Role preferences')");
+ for(const [id,v] of Object.entries({'pref-titles':'engineer, developer','pref-location':'Auckland','pref-workplace':'Remote','pref-type':'Any','pref-salary':'0','pref-excluded':''}))element('#'+id).value=v;
+ element('#pref-unknown').checked=true;
+ await element('#preferences-form').listeners.submit({preventDefault(){}});
+ await run("render('Opportunities')");
+ assert.equal(await run('searchSettings.provider'),'All available');
+ assert.equal(await run('searchSettings.query'),'engineer, developer');
+ assert.equal(await run('searchSettings.location'),'Auckland');
+ assert.equal(await run('searchSettings.remote'),true);
+ assert.ok(element('#job-search-results').innerHTML.includes('Live engineer'));
+ assert.equal(element('#job-search-status').textContent,'Search complete.');
  const member=await f.member('frontend-member@example.com');cookie=member.cookie;await run('loadSession()');await run("render('Today')");assert.ok(!element('#app').innerHTML.includes('data-route="Members"'));assert.ok(!element('#app').innerHTML.includes('data-route="Invitations"'));
  await run("render('Invitations')");assert.ok(element('#app').innerHTML.includes('Administrator access is required.'));
  }finally{f.db.close();}

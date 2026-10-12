@@ -12,7 +12,7 @@ docker compose exec milo node scripts/setup-admin.cjs
 
 The administrator setup command prompts for the first administrator's email, name and password. Password entry is hidden. Bootstrap stops working once any account exists; there is no public registration or default password.
 
-Open https://localhost:8080 and sign in. Use **Invitations** to create a 72-hour, single-use link for a member. Copy the link when created; the secret is not stored in readable form or shown again. Deliver it yourself; invitation emails are not sent by Milo yet.
+Open https://localhost:8080/#Signup to create the first administrator through the browser instead of the interactive command. Signup signs you in automatically and closes once an account exists. Existing users sign in at https://localhost:8080. Use **Invitations** to create a 72-hour, single-use link for a member. Copy the link when created; the secret is not stored in readable form or shown again. Deliver it yourself; invitation emails are not sent by Milo yet.
 
 The live app starts empty. Add your own applications, CV documents/text, preferences and cover letters. These are saved in the `milo-data` Docker volume. A normal `docker compose down` preserves the volume. Removing the volume deletes the data.
 
@@ -38,6 +38,16 @@ MILO_PUBLIC_URL=https://localhost:8090
 For your server, configure the externally reachable HTTPS origin, such as `https://milo.example.com`, and supply a matching trusted TLS certificate in `certs/cert.pem` and private key in `certs/key.pem`. Route any proxy to the container over HTTPS and validate its certificate. Forward browser Origin and Host normally; Milo does not trust forwarded headers to construct invitation URLs or identify clients. HTTPS ingress automation remains a later deployment task. The live server accepts HTTPS only.
 
 Keep the default `MILO_BIND_ADDRESS=127.0.0.1` for a host-based proxy. If another machine/container must access the published port, configure the bind address and network intentionally. The built-in login limiter uses socket addresses; behind a proxy, users may share a limit. A trusted-proxy-aware limiter is a later deployment improvement.
+
+## Live job search
+
+In the live portal, open **Opportunities**, choose a source and search. Arbeitnow is available without a key and covers mainly Europe; remote jobs may have country restrictions. Keyword and location filters apply to each downloaded page, so an empty page can still have more results on subsequent pages. Results are cached for 15 minutes. **Review and save** fills an application draft for review; verify the work arrangement and employment type before saving. Salary remains blank because foreign-currency and predicted figures are not imported as NZD. Existing saved URLs open their application instead of creating another draft.
+
+For New Zealand listings, register at [Adzuna's developer portal](https://developer.adzuna.com/), set `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` in your ignored `.env`, and run `docker compose up -d`. Select **Adzuna NZ** in Opportunities. Credentials stay on the server. The remote-only filter is available for Arbeitnow, Working Nomads and JobSpy; Adzuna does not verify work arrangements. Live Adzuna validation requires your credentials. Local direct Node execution also requires Python 3.10+; set `MILO_PYTHON=python` if the executable is not named `python3`.
+
+Provider requests have time and response-size limits. Searches require a signed-in account, check the request origin and throttle repeated requests. Provider outages display an error without inserting fictional results or changing saved applications. JobSpy sources use the pinned Python dependency in requirements.txt. See [job discovery](job-discovery.md) for the additional sources, country filters, combined search and optional paid SEEK/Apify setup.
+
+Sources: [Arbeitnow API](https://www.arbeitnow.com/blog/job-board-api), [Adzuna search API](https://developer.adzuna.com/docs/search).
 
 ## Design preview
 
@@ -70,7 +80,7 @@ Node 24 provides the built-in SQLite API, which is still experimental in that re
 
 ## Validation
 
-`docker compose config --quiet`, `npm test` and `python -m unittest discover -s tests -p 'test_*.py'` validate configuration and application behavior. Tests use real temporary SQLite databases and exercise the HTTP handler and browser script against the service; they do not replace real-browser tests. On 12 October 2026, the Docker image built successfully with all 10 service tests, prototype checks and 3 Python tests passing. The live container became healthy and its HTTPS health endpoint and login page returned HTTP 200. Full interactive browser QA remains outstanding.
+`docker compose config --quiet`, `npm test` and `python -m unittest discover -s tests -p 'test_*.py'` validate configuration and application behavior. Tests use real temporary SQLite databases and exercise the HTTP handler and browser script against the service; they do not replace real-browser tests. On 12 October 2026, the Docker image built successfully with all 15 service tests, prototype checks and 8 Python tests passing. The live container became healthy and its HTTPS health endpoint and login page returned HTTP 200. Full interactive browser QA remains outstanding.
 
 References: [Node 24 SQLite API](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html), [Docker multi-stage builds](https://docs.docker.com/build/building/multi-stage/), [Compose startup](https://docs.docker.com/reference/cli/docker/compose/up/).
 
