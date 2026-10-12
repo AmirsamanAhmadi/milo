@@ -33,9 +33,10 @@ function handler(service,{assetsDir=path.resolve(__dirname,'../live')}={}) {
         for await(const chunk of req){size+=chunk.length;if(size>max)throw new Problem(413,'Request is too large.');chunks.push(chunk);}
         try {body=JSON.parse(Buffer.concat(chunks).toString()||'{}');}catch{throw new Problem(400,'Invalid JSON.');}
       }
-      const result=await service.dispatch({method:req.method,path:url.pathname,body,cookie:req.headers.cookie,requestOrigin:req.headers.origin,ip:req.socket?.remoteAddress||'unknown'});
+      const result=await service.dispatch({method:req.method,path:url.pathname,query:Object.fromEntries(url.searchParams),body,cookie:req.headers.cookie,requestOrigin:req.headers.origin,ip:req.socket?.remoteAddress||'unknown'});
       res.statusCode=result.status;
       if(result.cookie)res.setHeader('Set-Cookie',result.cookie);
+      if(result.redirect){res.setHeader('Location',result.redirect);res.end();return;}
       if(result.binary) {
         res.setHeader('Content-Type','application/octet-stream');
         res.setHeader('Content-Disposition',`attachment; filename="milo-document"; filename*=UTF-8''${encodeURIComponent(result.name).replace(/'/g,'%27')}`);

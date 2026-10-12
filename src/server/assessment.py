@@ -66,7 +66,27 @@ def assess(cv, jobs):
                      "reason": "Save readable CV text first." if not available else
                      "The listing needs a fuller description or more identifiable skills." if not sufficient else
                      f"Your CV mentions {len(matched)} of {len(requested)} recognized skill topics in the listing. Review requirements and evidence; no experience level or eligibility is verified."})
-    return {"cv": overview, "fits": fits}
+    skills = [name for name, terms in SKILLS.items() if any(mentions(cv, term) for term in terms)]
+    roles = {
+        "Project management": "Project Manager", "Delivery": "Delivery Lead",
+        "Python": "Python Developer", "JavaScript": "Software Engineer",
+        "SQL": "Data Analyst", "Leadership": "Team Lead",
+        'Cloud': 'Cloud Engineer', 'Docker': 'DevOps Engineer', 'Kubernetes': 'DevOps Engineer',
+        'React': 'Frontend Developer', 'Java': 'Java Developer', 'C# / .NET': '.NET Developer',
+        'Data analysis': 'Data Analyst', 'Machine learning': 'Machine Learning Engineer',
+        'Agile': 'Scrum Master', 'Stakeholder management': 'Business Analyst',
+        'Customer service': 'Customer Service Representative', 'Sales': 'Sales Representative',
+        'Finance': 'Financial Analyst', 'Testing': 'QA Engineer', 'Security': 'Security Analyst',
+        'Design': 'UX Designer', 'Operations': 'Operations Manager',
+    }
+    profession_titles = ['Registered Nurse', 'Nurse', 'Teacher', 'Lecturer', 'Civil Engineer',
+                         'Mechanical Engineer', 'Electrical Engineer', 'Accountant', 'Architect',
+                         'Lawyer', 'Doctor', 'Pharmacist', 'Physiotherapist', 'Chef', 'Electrician',
+                         'Plumber', 'Marketing Manager', 'HR Manager', 'Administrative Assistant',
+                         'Research Scientist', 'Warehouse Manager', 'Truck Driver']
+    inferred = [title for title in profession_titles if mentions(cv, title)]
+    recommendations = list(dict.fromkeys(inferred + [roles[skill] for skill in skills if skill in roles]))[:6] if available else []
+    return {"cv": overview, "fits": fits, "recommendations": recommendations, "skills": skills}
 
 
 def extract(kind, encoded):
@@ -100,7 +120,11 @@ def extract(kind, encoded):
 if __name__ == "__main__":
     try:
         data = json.load(sys.stdin)
-        result = {"text": extract(data["kind"], data["base64"])} if data.get("extract") else assess(data.get("cv", ""), data.get("jobs", []))
+        if data.get('interview'):
+            from interview import prepare
+            result = prepare(data.get('cv', ''), data.get('job', {}))
+        else:
+            result = {"text": extract(data["kind"], data["base64"])} if data.get("extract") else assess(data.get("cv", ""), data.get("jobs", []))
         print(json.dumps(result))
     except Exception:
         print("CV processing failed. Use reviewed text or a readable PDF/DOCX/TXT.", file=sys.stderr)

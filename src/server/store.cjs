@@ -66,7 +66,10 @@ function openStore(filename) {
   const columns=new Set(db.prepare('PRAGMA table_info(applications)').all().map(column=>column.name));
   if(!columns.has('country'))db.exec("ALTER TABLE applications ADD COLUMN country TEXT NOT NULL DEFAULT 'new zealand'");
   if(!columns.has('currency'))db.exec("ALTER TABLE applications ADD COLUMN currency TEXT NOT NULL DEFAULT 'NZD'");
-  db.exec('PRAGMA user_version=2');
+  db.exec(`CREATE TABLE IF NOT EXISTS email_accounts (user_id TEXT NOT NULL REFERENCES users(id), provider TEXT NOT NULL, encrypted_tokens TEXT NOT NULL, synced_at TEXT NOT NULL, PRIMARY KEY(user_id,provider));
+    CREATE TABLE IF NOT EXISTS email_messages (user_id TEXT NOT NULL REFERENCES users(id),provider TEXT NOT NULL,message_id TEXT NOT NULL,subject TEXT NOT NULL,sender TEXT NOT NULL,received_at TEXT NOT NULL,snippet TEXT NOT NULL,application_id TEXT REFERENCES applications(id) ON DELETE SET NULL,imported_at TEXT NOT NULL,PRIMARY KEY(user_id,provider,message_id));
+    CREATE TABLE IF NOT EXISTS email_clients (user_id TEXT NOT NULL REFERENCES users(id),provider TEXT NOT NULL,client_id TEXT NOT NULL,encrypted_secret TEXT NOT NULL,PRIMARY KEY(user_id,provider));
+    PRAGMA user_version=4;`);
   return db;
 }
 module.exports = { openStore };

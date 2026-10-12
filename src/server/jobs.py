@@ -68,13 +68,28 @@ def fetch_jobs(settings):
 def fetch_jobspy(settings, scraper=None):
     if scraper is None:
         from jobspy import scrape_jobs
+        from jobspy.model import Country
         scraper = scrape_jobs
+        selected = settings.get('country', 'new zealand')
+        aliases = {'korea south': 'south korea', 'czechia': 'czech republic', 'türkiye': 'turkey'}
+        selected = aliases.get(selected, selected)
+        try:
+            Country.from_string(selected)
+        except ValueError:
+            if settings['provider'] != 'LinkedIn':
+                return {'jobs': [], 'hasMore': False, 'warning': 'This job board does not support the selected country. Try LinkedIn or a remote source.'}
+            selected = 'usa'  # LinkedIn searches by location; this argument is unused by that adapter.
+        settings = {**settings, 'country_indeed': selected}
     # Suppress library stdout so this subprocess always returns one JSON document.
+    country = settings.get('country', 'new zealand')
+    location = settings.get('location') or country
+    if settings['provider'] == 'LinkedIn' and settings.get('location') and country not in location.lower():
+        location += ', ' + ('United States' if country == 'usa' else country)
     with redirect_stdout(sys.stderr):
         frame = scraper(site_name=[settings["provider"].lower()],
                         search_term=" OR ".join('"' + term.strip().replace('"', '') + '"' for term in settings["query"].split(",") if term.strip()),
-                        location=settings.get("location") or settings.get("country", "new zealand"),
-                        country_indeed=settings.get("country", "new zealand"),
+                        location=location,
+                        country_indeed=settings.get('country_indeed', settings.get("country", "new zealand")),
                         results_wanted=20, offset=(settings["page"] - 1) * 20,
                         is_remote=settings.get("remote", False),
                         description_format="html", verbose=0)

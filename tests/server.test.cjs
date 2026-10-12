@@ -16,6 +16,71 @@ const {createService}=require('../src/server/service.cjs');
 const {handler}=require('../src/server/http.cjs');
 const origin='http://localhost:8080';
 const app={role:'Delivery Lead',company:'Example',location:'Auckland',workplace:'Hybrid',employment_type:'Permanent',source:'SEEK',url:'https://example.com/job',salary:130000,stage:'Applied',applied_at:'2026-10-08',follow_up:'',description:'Verified requirements',notes:'Private notes'};
+test('worldwide geography includes local currency and location suggestions',()=>{
+ const {geography,countryFor}=require('../src/server/geography.cjs');
+ assert.ok(geography().length>200);assert.equal(countryFor('india').currency,'INR');
+ assert.ok(countryFor('india').locations.includes('Mumbai'));assert.equal(countryFor('germany').currency,'EUR');
+ assert.equal(countryFor('nonexistent'),undefined);
+});
+test('job ranking puts unscored jobs last and sponsorship rejects negative evidence',()=>{
+ const {rankJobs,filterSponsorship}=require('../src/server/career.cjs');
+ const jobs=rankJobs([{role:'A',description:'Visa sponsorship available',fit:{score:20}},{role:'B',description:'We do not offer visa sponsorship.',fit:{score:90}},{role:'C',description:'Join us',fit:{score:null}}]);
+ assert.deepEqual(jobs.map(j=>j.role),['B','A','C']);assert.equal(jobs[0].sponsorship,'Not offered');
+ assert.deepEqual(filterSponsorship(jobs,'Required').map(j=>j.role),['A']);assert.deepEqual(filterSponsorship(jobs,'Required, include unknown').map(j=>j.role),['A','C']);
+});
+test('Gmail sync requests read-only metadata and imports recruitment previews',async()=>{
+ const f=await fixture(),{createMail}=require('../src/server/mail.cjs');
+ const oldId=process.env.GMAIL_CLIENT_ID,oldSecret=process.env.GMAIL_CLIENT_SECRET;
+ process.env.GMAIL_CLIENT_ID=randomBytes(8).toString('hex');process.env.GMAIL_CLIENT_SECRET=randomBytes(24).toString('hex');
+ try{
+ const owner=f.db.prepare('SELECT id FROM users LIMIT 1').get(),requests=[];
+ const request=async url=>{requests.push(url);if(url.includes('/token'))return {access_token:randomBytes(24).toString('hex'),refresh_token:randomBytes(24).toString('hex')};if(url.includes('/messages?'))return {messages:[{id:'gmail-1'}]};return {id:'gmail-1',internalDate:Date.now(),snippet:'Your application was received.',payload:{headers:[{name:'Subject',value:'Application received'},{name:'From',value:'recruiter@example.com'}]}};};
+ const vault={encrypt:s=>Buffer.from(s).toString('base64'),decrypt:s=>Buffer.from(s,'base64').toString()};
+ const mail=createMail({db:f.db,vault,origin,request}),url=new URL(mail.connect(owner,'Gmail'));
+ assert.equal(url.searchParams.get('scope'),'https://www.googleapis.com/auth/gmail.readonly');
+ await mail.callback(owner,'Gmail',{state:url.searchParams.get('state'),code:'sample'});assert.equal((await mail.sync(owner,'Gmail')).imported,1);
+ assert.ok(requests.some(url=>url.includes('format=metadata')));assert.equal(f.db.prepare('SELECT subject FROM email_messages').get().subject,'Application received');
+ }finally{if(oldId===undefined)delete process.env.GMAIL_CLIENT_ID;else process.env.GMAIL_CLIENT_ID=oldId;if(oldSecret===undefined)delete process.env.GMAIL_CLIENT_SECRET;else process.env.GMAIL_CLIENT_SECRET=oldSecret;f.db.close();}
+});
+test('members configure private email clients through the API without exposing secrets',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'milo-mail-settings-')),filename=path.join(dir,'store.db');
+ const {createVault}=require('../src/server/provider-settings.cjs');const f=await fixture(filename,{credentialVault:createVault(dir)});
+ try{
+ const clientId=randomBytes(12).toString('hex'),clientSecret=randomBytes(24).toString('hex'),member=await f.member('email-settings@example.com');
+ assert.equal((await f.call('PUT','/api/email/settings',{provider:'Other',clientId,clientSecret},f.admin.cookie)).status,400);
+ assert.equal((await f.call('PUT','/api/email/settings',{provider:'Gmail',clientId,clientSecret:''},f.admin.cookie)).status,400);
+ const saved=await f.call('PUT','/api/email/settings',{provider:'Gmail',clientId,clientSecret},f.admin.cookie);assert.equal(saved.status,200);assert.ok(!JSON.stringify(saved.body).includes(clientSecret));
+ const status=saved.body.accounts.find(a=>a.provider==='Gmail');assert.equal(status.personalConfigured,true);assert.equal(status.clientId,clientId);
+ const record=f.db.prepare('SELECT * FROM email_clients').get();assert.notEqual(record.encrypted_secret,clientSecret);assert.equal(createVault(dir).decrypt(record.encrypted_secret),clientSecret);
+ const other=(await f.call('GET','/api/email',{},member.cookie)).body.accounts.find(a=>a.provider==='Gmail');assert.equal(other.personalConfigured,false);assert.equal(other.clientId,'');
+ const started=await f.call('POST','/api/email/connect',{provider:'Gmail'},f.admin.cookie);assert.equal(new URL(started.body.url).searchParams.get('client_id'),clientId);
+ assert.equal((await f.call('PUT','/api/email/settings',{provider:'Gmail',clientId,clientSecret:''},f.admin.cookie)).status,200);assert.equal(f.db.prepare('SELECT encrypted_secret FROM email_clients').get().encrypted_secret,record.encrypted_secret);
+ const reopened=openStore(filename);assert.equal(reopened.prepare('SELECT client_id FROM email_clients').get().client_id,clientId);reopened.close();
+ assert.equal((await f.call('PUT','/api/email/settings',{provider:'Gmail',clientId:'changed',clientSecret:''},f.admin.cookie)).status,400);
+ assert.equal((await f.call('PUT','/api/email/settings',{provider:'Gmail',useWorkspace:true},f.admin.cookie)).status,200);assert.equal(f.db.prepare('SELECT count(*) AS n FROM email_clients').get().n,0);
+ }finally{f.db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('mail OAuth binds state to its owner, encrypts tokens and deduplicates previews',async()=>{
+ const f=await fixture();const {createMail}=require('../src/server/mail.cjs');
+ const oldId=process.env.OUTLOOK_CLIENT_ID,oldSecret=process.env.OUTLOOK_CLIENT_SECRET;
+ process.env.OUTLOOK_CLIENT_ID=randomBytes(8).toString('hex');process.env.OUTLOOK_CLIENT_SECRET=randomBytes(24).toString('hex');
+ const {createVault}=require('../src/server/provider-settings.cjs');const dir=fs.mkdtempSync(path.join(os.tmpdir(),'milo-mail-'));
+ try{
+ const owner=f.db.prepare('SELECT id FROM users LIMIT 1').get();
+ const fakeToken=randomBytes(24).toString('hex');
+ const request=async url=>url.includes('/token')?{access_token:fakeToken,refresh_token:randomBytes(24).toString('hex'),expires_in:3600}:{value:[{id:'message-1',subject:'Example interview',from:{emailAddress:{address:'recruiter@example.com'}},receivedDateTime:'2026-10-12T00:00:00Z',bodyPreview:'Interview invitation for your application'}]};
+ const mail=createMail({db:f.db,vault:createVault(dir),origin,request});
+ const wrong=new URL(mail.connect(owner,'Outlook'));await assert.rejects(mail.callback({id:'other'},'Outlook',{state:wrong.searchParams.get('state'),code:'sample'}));
+ const url=new URL(mail.connect(owner,'Outlook')),params={state:url.searchParams.get('state'),code:'sample'};assert.equal(url.searchParams.get('code_challenge_method'),'S256');
+ await mail.callback(owner,'Outlook',params);await assert.rejects(mail.callback(owner,'Outlook',params));
+ assert.ok(!f.db.prepare('SELECT encrypted_tokens FROM email_accounts').get().encrypted_tokens.includes(fakeToken));
+ await f.call('POST','/api/applications',app,f.admin.cookie);await mail.sync(owner,'Outlook');await mail.sync(owner,'Outlook');
+ const rows=f.db.prepare('SELECT * FROM email_messages').all();assert.equal(rows.length,1);assert.ok(rows[0].application_id);
+ assert.equal((await f.call('GET','/api/email',{},f.admin.cookie)).body.messages.length,1);
+ const member=await f.member('mail-member@example.com');assert.equal((await f.call('GET','/api/email',{},member.cookie)).body.messages.length,0);
+ mail.disconnect(owner,'Outlook');assert.equal(f.db.prepare('SELECT count(*) AS n FROM email_messages').get().n,0);
+ }finally{if(oldId===undefined)delete process.env.OUTLOOK_CLIENT_ID;else process.env.OUTLOOK_CLIENT_ID=oldId;if(oldSecret===undefined)delete process.env.OUTLOOK_CLIENT_SECRET;else process.env.OUTLOOK_CLIENT_SECRET=oldSecret;f.db.close();fs.rmSync(dir,{recursive:true,force:true});}
+});
 async function fixture(filename=':memory:',serviceOptions={}) {
  const db=openStore(filename);let time=Date.now();const service=createService(db,{publicURL:origin,now:()=>time,...serviceOptions});
  await service.bootstrap({email:'admin@example.com',name:'Admin',password:adminPassword});

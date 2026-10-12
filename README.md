@@ -75,4 +75,4 @@ Local TLS uses a disposable self-signed certificate valid for 30 days. Trust `ce
 
 Backup and local TLS setup now use Python's standard library (Python 3.10+), with no additional pip dependencies; live JobSpy search uses the pinned package in requirements.txt. The container includes Python. The live service, administrator setup, browser interface and preview generator retain JavaScript. Legacy backup and shell TLS commands remain available for compatibility. Python backups refuse to overwrite existing files; choose a fresh destination each time.
 
-See [the interface review](docs/ui-review.md) for navigation, currency behavior and browser verification.
+See [the interface review](docs/ui-review.md) for worldwide location/currency suggestions, sponsorship filtering, CV recommendations, job saving, interview materials and browser verification. Gmail and Outlook connections require the [email OAuth setup](docs/email-sync.md).

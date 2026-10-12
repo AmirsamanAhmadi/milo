@@ -2,7 +2,11 @@
 
 Navigation groups live search, preferences and applications under **Find jobs**; CV studio, job toolkit and cover letters under **CV & writing**; account and AI connections under **Settings**. Administrators also see **Administration** for members and invitations. Native disclosure menus support keyboard navigation and Escape to close. Active pages highlight their group.
 
-Role preferences use separate sections for roles/location, work arrangement/pay and excluded companies. The selected country persists to live search and determines the salary currency: New Zealand → NZD, Australia → AUD, United Kingdom → GBP, United States → USD. Each application saves its own country and currency. Legacy records retain NZD, matching the previously displayed currency. No exchange-rate conversion occurs. Country changes clear salary input for confirmation; preference thresholds never compare different currencies as if they were the same.
+Role preferences use separate sections for roles/location, work arrangement/pay and excluded companies. The country selector includes 250 countries and territories from the bundled geography snapshot, with automatic default currencies and over 140,000 state/city suggestions. Each application saves its own country and currency. Legacy records retain NZD, matching the previously displayed currency. No exchange-rate conversion occurs. Country changes clear salary input for confirmation; preference thresholds never compare different currencies as if they were the same. See the [data attribution and refresh command](../src/server/geography/README.md).
+
+Visa sponsorship can be required, required with unknown listings included, or not required. Explicit negative sponsorship wording takes precedence over positive keywords; unstated information stays unknown. Live jobs sort by highest local CV keyword score, with unscored jobs last. Save job creates an application immediately, independently of preference filtering; saved jobs appear in Applications. CV recommendations derive search terms from the uploaded/reviewed CV locally, and start automatically when no target keywords are saved. The recommendation button can also replace an existing search.
+
+Interview preparation uses the selected JD and CV gaps to prioritize study topics, link to official learning resources and suggest practice questions. It is available on live listings, saved applications and Job toolkit. Email sync supports Gmail and Outlook OAuth; see [mailbox setup](email-sync.md).
 
 Job toolkit separates the job brief, comparison/generation controls and editable drafts. AI settings presents provider cards, relevant key inputs and an account-sign-in panel. Layouts use the existing light/dark theme and collapse on smaller screens.
 
@@ -23,5 +27,7 @@ Screenshots contain fictional review data:
 - [AI settings](screenshots/ai-settings.png)
 - [AI settings in dark mode](screenshots/ai-settings-dark.png)
 - [Mobile navigation](screenshots/mobile-navigation.png)
+- [Interview preparation](screenshots/interview-preparation.png)
+- [Email sync](screenshots/email-sync.png)
 
 Backend currency validation is included in `npm test` and Docker builds. Python and service tests do not require the optional browser test image.

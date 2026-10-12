@@ -9,8 +9,11 @@ const codexAccount=require('./codex-account.cjs');
 const stages = ['Discovered','Ready','Applied','Recruiter screen','Assessment','Interview','Team match','Technical interview','Final round','Offer','Rejected','Withdrawn','No response'];
 const workplaces = ['Remote','Hybrid','Onsite'];
 const types = ['Permanent','Contract','Part-time','Internship'];
-const currencies={'new zealand':'NZD',australia:'AUD','united kingdom':'GBP',usa:'USD'};
-const defaultPreferences = { titles:'', location:'', workplace:'Any', type:'Any', salary:0, unknownSalary:true, excluded:'',country:'new zealand',currency:'NZD' };
+const {countryFor,geography}=require('./geography.cjs');
+const {rankJobs,filterSponsorship}=require('./career.cjs');
+const {createMail}=require('./mail.cjs');
+const currencies=new Proxy({}, {get:(_,key)=>countryFor(key)?.currency});
+const defaultPreferences = { titles:'', location:'', workplace:'Any', type:'Any', salary:0, unknownSalary:true, excluded:'',sponsorship:'Any',country:'new zealand',currency:'NZD' };
 class Problem extends Error { constructor(status, message) { super(message); this.status=status; } }
 const fail = (status,message) => { throw new Problem(status,message); };
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -56,7 +59,7 @@ function applicationInput(data) {
   if(!currency||data.currency&&data.currency!==currency)fail(400,'Choose a valid country and its salary currency.');
   if (!stages.includes(data.stage)||!workplaces.includes(data.workplace)||!types.includes(data.employment_type)) fail(400,'Choose a valid stage, workplace and employment type.');
   const salary=data.salary===null||data.salary===''||data.salary===undefined?null:Number(data.salary);
-  if(salary!==null && (!Number.isSafeInteger(salary)||salary<0||salary>10000000)) fail(400,'Enter a valid annual salary.');
+  if(salary!==null && (!Number.isSafeInteger(salary)||salary<0||salary>1000000000000)) fail(400,'Enter a valid annual salary.');
   return { role:text(data.role,'role',200,true),company:text(data.company,'company',200,true),location:text(data.location??'','location'),workplace:data.workplace,employment_type:data.employment_type,source:text(data.source??'','source'),url:httpURL(data.url),salary,stage:data.stage,applied_at:date(data.applied_at,'application date'),follow_up:date(data.follow_up,'follow-up date'),description:text(data.description??'','job description',30000),notes:text(data.notes??'','notes',10000),country,currency };
 }
 function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now(), jobSearch=createJobSearch(), adzunaConfigured=Boolean(process.env.ADZUNA_APP_ID&&process.env.ADZUNA_APP_KEY), seekConfigured=Boolean(process.env.APIFY_TOKEN), aiGenerator=generateAI, aiConfigured=Boolean(process.env.OPENAI_API_KEY&&process.env.OPENAI_MODEL), aiModel=process.env.OPENAI_MODEL||'', credentialVault=null }={}) {
@@ -69,6 +72,7 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
     return {provider,model,configured,personalKeySaved:Boolean(saved?.encrypted_key),localConfigured:Boolean(process.env.LOCAL_AI_URL),codex:codexAccount.status(user.id),...(includeKey&&provider==='My OpenAI key'&&saved?.encrypted_key?{apiKey:vault.decrypt(saved.encrypted_key)}:{}),...(includeKey&&provider==='ChatGPT'?{codexHome:codexAccount.accountHome(user.id)}:{})};
   }
   const origin=new URL(publicURL).origin;
+  const mail=createMail({db,vault,origin,now});
   const secure=new URL(publicURL).protocol==='https:';
   const statement=(sql,...args)=>db.prepare(sql).get(...args);
   function transaction(action) { db.exec('BEGIN IMMEDIATE'); try { const result=action(); db.exec('COMMIT'); return result; } catch(e) { db.exec('ROLLBACK'); throw e; } }
@@ -112,7 +116,7 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
     const bucket=attempts.get(ip)||{count:0,until:time+15*60000};bucket.count++;attempts.set(ip,bucket);
     if(bucket.count>20)fail(429,'Too many attempts. Try again in 15 minutes.');
   }
-  async function dispatch({method='GET',path='/',body={},cookie='',requestOrigin='',ip='local'}) {
+  async function dispatch({method='GET',path='/',query={},body={},cookie='',requestOrigin='',ip='local'}) {
     try {
       if(!['GET','POST','PUT','DELETE'].includes(method))fail(405,'Method not supported.');
       if(method!=='GET' && requestOrigin!==origin)fail(403,'Request origin was not accepted.');
@@ -141,6 +145,16 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         return {status:201,body:{user:publicUser(u)},cookie:startSession(u)};
       }
       const user=authenticate(cookie);
+      if(path==='/api/geography'&&method==='GET')return {status:200,body:{countries:geography()}};
+      if(path.startsWith('/api/geography/')&&method==='GET'){const country=geography(decodeURIComponent(path.slice(15)));if(!country)fail(404,'Country not found.');return {status:200,body:{country}};}
+      if(path==='/api/jobs/recommendations'&&method==='GET'){const cv=await cvText(user),result=await processCV({cv:cv.text,jobs:[]});return {status:200,body:{roles:result.recommendations,skills:result.skills,available:result.cv.available}};}
+      if(path==='/api/interview'&&method==='POST'){const job={role:text(body.job?.role,'role',200,true),description:text(body.job?.description,'description',30000,true)};const cv=await cvText(user);return {status:200,body:await processCV({interview:true,cv:cv.text,job})};}
+      if(path==='/api/email'&&method==='GET')return {status:200,body:{accounts:mail.status(user),messages:db.prepare('SELECT provider,subject,sender,received_at,snippet,application_id FROM email_messages WHERE user_id=? ORDER BY received_at DESC LIMIT 100').all(user.id)}};
+      if(path.startsWith('/api/email/callback/')&&method==='GET'){const provider=path.endsWith('/gmail')?'Gmail':path.endsWith('/outlook')?'Outlook':'';try{await mail.callback(user,provider,query);return {status:303,redirect:origin+'/#Email%20sync',body:{ok:true}};}catch{fail(400,'Email connection failed or expired. Return to Email sync and reconnect.');}}
+      if(path==='/api/email/connect'&&method==='POST'){try{return {status:200,body:{url:mail.connect(user,body.provider)}};}catch(e){fail(400,e.message);}}
+      if(path==='/api/email/settings'&&method==='PUT'){try{mail.settings(user,body);return {status:200,body:{accounts:mail.status(user)}};}catch(e){fail(400,e.message);}}
+      if(path==='/api/email/sync'&&method==='POST'){throttle('mail:'+user.id);try{return {status:200,body:await mail.sync(user,body.provider)};}catch(e){fail(502,e.message);}}
+      if(path==='/api/email/disconnect'&&method==='POST'){try{mail.disconnect(user,body.provider);return {status:200,body:{ok:true}};}catch(e){fail(400,e.message);}}
       if(path==='/api/ai/status'&&method==='GET')return {status:200,body:aiConfiguration(user)};
       if(path==='/api/ai/settings'&&method==='PUT'){
         if(!['OpenAI','My OpenAI key','Local AI','ChatGPT'].includes(body.provider))fail(400,'Choose a supported AI provider.');
@@ -200,7 +214,7 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         if(provider==='Adzuna NZ'&&!adzunaConfigured)fail(503,'New Zealand search requires Adzuna credentials. Ask your administrator to configure them.');
         const query=text(body.query??'','search keywords',200),location=text(body.location??'','search location',200),page=body.page??1;
         const country=body.country??'new zealand';
-        if(!['new zealand','australia','united kingdom','usa'].includes(country))fail(400,'Choose a supported country.');
+        if(!countryFor(country))fail(400,'Choose a valid country.');
         if(provider==='SEEK'&&(!['new zealand','australia'].includes(country)||page!==1||body.remote))fail(400,'SEEK supports Australia/New Zealand, one page and no remote-only filter.');
         if(['All available','Indeed','LinkedIn','Glassdoor'].includes(provider)&&!query)fail(400,'Enter search keywords for job-board searches.');
         if(!Number.isInteger(page)||page<1||page>10||typeof body.remote!=='boolean')fail(400,'Choose valid search filters.');
@@ -211,7 +225,10 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         let assessment;
         try{assessment=await processCV({cv:cv.text,jobs:result.jobs});}
         catch{fail(503,'CV assessment is unavailable. Try again later.');}
-        return {status:200,body:{...result,cv:assessment.cv,cvSource:cv.source,cvError:cv.error,jobs:result.jobs.map((job,index)=>({...job,fit:assessment.fits[index]}))}};
+        const sponsorship=body.sponsorship||'Any';
+        if(!['Any','Required','Required, include unknown','Not required'].includes(sponsorship))fail(400,'Choose a valid sponsorship filter.');
+        const jobs=filterSponsorship(rankJobs(result.jobs.map((job,index)=>({...job,fit:assessment.fits[index]}))),sponsorship);
+        return {status:200,body:{...result,cv:assessment.cv,cvSource:cv.source,cvError:cv.error,jobs}};
       }
       if(path==='/api/me/password'&&method==='PUT') {
         throttle('password:'+user.id);
@@ -259,7 +276,7 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
       }
       if(path==='/api/preferences') {
         if(method==='GET')return {status:200,body:{preferences:{...defaultPreferences,...JSON.parse(statement('SELECT data FROM preferences WHERE user_id=?',user.id)?.data||'{}')}}};
-        if(method==='PUT') {const country=body.country??'new zealand',currency=currencies[country];if(!currency||body.currency&&body.currency!==currency||!['Any',...workplaces].includes(body.workplace)||!['Any',...types].includes(body.type)||typeof body.unknownSalary!=='boolean'||!Number.isSafeInteger(body.salary)||body.salary<0||body.salary>10000000)fail(400,'Choose valid preferences.');const p={titles:text(body.titles,'titles',1000),location:text(body.location,'location'),workplace:body.workplace,type:body.type,salary:body.salary,unknownSalary:body.unknownSalary,excluded:text(body.excluded,'excluded companies',1000),country,currency};db.prepare('INSERT INTO preferences VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(user.id,JSON.stringify(p));return {status:200,body:{preferences:p}};}
+        if(method==='PUT') {const country=body.country??'new zealand',currency=currencies[country];if(!currency||body.currency&&body.currency!==currency||!['Any',...workplaces].includes(body.workplace)||!['Any',...types].includes(body.type)||typeof body.unknownSalary!=='boolean'||!Number.isSafeInteger(body.salary)||body.salary<0||body.salary>1000000000000)fail(400,'Choose valid preferences.');const sponsorship=body.sponsorship||'Any';if(!['Any','Required','Required, include unknown','Not required'].includes(sponsorship))fail(400,'Choose a valid sponsorship filter.');const p={sponsorship,titles:text(body.titles,'titles',1000),location:text(body.location,'location'),workplace:body.workplace,type:body.type,salary:body.salary,unknownSalary:body.unknownSalary,excluded:text(body.excluded,'excluded companies',1000),country,currency};db.prepare('INSERT INTO preferences VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET data=excluded.data').run(user.id,JSON.stringify(p));return {status:200,body:{preferences:p}};}
       }
       if(path==='/api/cv'&&method==='GET'){const cv=await cvText(user),assessment=await processCV({cv:cv.text,jobs:[]});return {status:200,body:{...cv,assessment:assessment.cv,documents:db.prepare('SELECT id,name,kind,length(bytes) AS size,created_at FROM documents WHERE user_id=? ORDER BY created_at DESC').all(user.id)}};}
       if(path==='/api/cv'&&method==='PUT') {const contents=text(body.text,'CV text',100000);db.prepare('INSERT INTO cv_profiles VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET text=excluded.text,updated_at=excluded.updated_at').run(user.id,contents,iso(now()));return {status:200,body:{ok:true}};}
