@@ -6,7 +6,11 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const os=require('node:os');
 const path=require('node:path');
-const {Readable}=require('node:stream');
+const {Readable,Writable}=require('node:stream');
+function response(){
+ const res=new Writable({write(chunk,encoding,done){this.value=(this.value||'')+chunk.toString();done();}});
+ res.headers={};res.statusCode=200;res.setHeader=function(k,v){this.headers[k]=v;};return res;
+}
 const {openStore}=require('../src/server/store.cjs');
 const {createService}=require('../src/server/service.cjs');
 const {handler}=require('../src/server/http.cjs');
@@ -20,6 +24,46 @@ async function fixture(filename=':memory:') {
  async function member(email){const inv=await call('POST','/api/admin/invitations',{email},admin.cookie);const token=new URL(inv.body.url).hash.slice(8);const accepted=await call('POST','/api/invitations/accept',{token,name:email,password:memberPassword()});assert.equal(accepted.status,201);return {cookie:accepted.cookie,token};}
  return {db,service,call,admin,member,advance:ms=>{time+=ms;}};
 }
+test('password changes require current credentials and revoke only the owner sessions',async()=>{
+ const f=await fixture();try {
+ const other=await f.member('other@example.com');
+ const second=await f.call('POST','/api/login',{email:'admin@example.com',password:adminPassword});
+ const newPassword=memberPassword();
+ const change=(currentPassword,newPassword,cookie=f.admin.cookie,extra={})=>f.call('PUT','/api/me/password',{currentPassword,newPassword},cookie,extra);
+ assert.equal((await change(adminPassword,newPassword,'')).status,401);
+ assert.equal((await change(adminPassword,newPassword,f.admin.cookie,{requestOrigin:'https://foreign.example'})).status,403);
+ assert.equal((await change('incorrect',newPassword)).status,400);
+ for(const invalid of ['short','x'.repeat(129),null,adminPassword])assert.equal((await change(adminPassword,invalid)).status,400);
+ assert.equal((await f.call('GET','/api/me',{},second.cookie)).status,200);
+ const result=await change(adminPassword,newPassword);
+ assert.equal(result.status,200);assert.notEqual(result.cookie,f.admin.cookie);
+ assert.equal((await f.call('GET','/api/me',{},result.cookie)).status,200);
+ for(const cookie of [f.admin.cookie,second.cookie])assert.equal((await f.call('GET','/api/me',{},cookie)).status,401);
+ assert.equal((await f.call('GET','/api/me',{},other.cookie)).status,200);
+ assert.equal((await f.call('POST','/api/login',{email:'admin@example.com',password:adminPassword})).status,401);
+ assert.equal((await f.call('POST','/api/login',{email:'admin@example.com',password:newPassword})).status,200);
+ }finally{f.db.close();}
+});
+
+test('concurrent password changes allow only one update',async()=>{
+ const f=await fixture();try {
+ const passwords=[memberPassword(),memberPassword()];
+ const results=await Promise.all(passwords.map(newPassword=>f.call('PUT','/api/me/password',{currentPassword:adminPassword,newPassword},f.admin.cookie)));
+ assert.equal(results.filter(r=>r.status===200).length,1);
+ const winner=results.findIndex(r=>r.status===200);
+ assert.equal((await f.call('POST','/api/login',{email:'admin@example.com',password:passwords[winner]})).status,200);
+ assert.equal((await f.call('POST','/api/login',{email:'admin@example.com',password:passwords[1-winner]})).status,401);
+ }finally{f.db.close();}
+});
+
+test('password verification attempts are throttled without changing credentials',async()=>{
+ const f=await fixture();try {
+ for(let i=0;i<20;i++)assert.equal((await f.call('PUT','/api/me/password',{currentPassword:'incorrect',newPassword:memberPassword()},f.admin.cookie)).status,400);
+ assert.equal((await f.call('PUT','/api/me/password',{currentPassword:adminPassword,newPassword:memberPassword()},f.admin.cookie)).status,429);
+ assert.equal((await f.call('GET','/api/me',{},f.admin.cookie)).status,200);
+ }finally{f.db.close();}
+});
+
 test('invite-only accounts, admin permissions, single-use and expired invitations',async()=>{
  const f=await fixture();try {
  assert.equal((await f.call('GET','/api/applications')).status,401);
@@ -68,7 +112,7 @@ test('applications, history, letters, preferences and documents stay private and
  const db=openStore(filename);try{const service=createService(db,{publicURL:origin});const result=await service.dispatch({method:'GET',path:'/api/applications/'+id,cookie});assert.equal(result.body.application.stage,'Interview');assert.equal(result.body.application.notes,'Private notes');const cv=await service.dispatch({method:'GET',path:'/api/cv',cookie});assert.equal(cv.body.text,'Private CV evidence');assert.equal(cv.body.documents.length,1);}finally{db.close();fs.rmSync(folder,{recursive:true,force:true});}
 });
 test('HTTP transport serves only live assets, rejects invalid requests, and returns private JSON',async()=>{
- const f=await fixture();try{const serve=handler(f.service);async function request(method,url,body,headers={}){const req=Readable.from(body===undefined?[]:[Buffer.from(body)]);Object.assign(req,{method,url,headers,socket:{remoteAddress:'test'}});const res={headers:{},statusCode:200,setHeader(k,v){this.headers[k]=v},end(value){this.value=value}};await serve(req,res);return res;}
+ const f=await fixture();try{const serve=handler(f.service);async function request(method,url,body,headers={}){const req=Readable.from(body===undefined?[]:[Buffer.from(body)]);Object.assign(req,{method,url,headers,socket:{remoteAddress:'test'}});const res=response();await serve(req,res);return res;}
  assert.equal((await request('GET','/src/server/service.cjs')).statusCode,404);
  assert.equal((await request('GET','/preview/members.html')).statusCode,404);
  assert.equal((await request('GET','/health')).value,'ok');
@@ -103,6 +147,18 @@ test('live frontend saves applications through the real service and renders esca
  await element('#application-form').listeners.submit({preventDefault(){}});
  const records=await f.call('GET','/api/applications',{},cookie);assert.equal(records.body.applications.length,1);assert.equal(records.body.applications[0].notes,'Saved note');
  await run("render('Applications')");assert.ok(element('#app').innerHTML.includes('&lt;script&gt;Private role'));assert.ok(!element('#app').innerHTML.includes('<script>Private role'));
+ await run("render('My account')");assert.ok(element('#app').innerHTML.includes('id="password-form"'));
+ const newPassword=memberPassword(),previousCookie=cookie;
+ element('#password-current').value=adminPassword;element('#password-new').value=newPassword;element('#password-confirm').value='mismatch';
+ await element('#password-form').listeners.submit({preventDefault(){}});
+ assert.equal(element('#notice').textContent,'New passwords do not match.');assert.equal(cookie,previousCookie);
+ element('#password-confirm').value=newPassword;
+ let cleared=false;element('#password-form').reset=()=>{cleared=true;for(const id of ['password-current','password-new','password-confirm'])element('#'+id).value='';};
+ await element('#password-form').listeners.submit({preventDefault(){}});
+ assert.ok(cleared);assert.notEqual(cookie,previousCookie);
+ assert.equal((await f.call('GET','/api/me',{},cookie)).status,200);
+ assert.equal((await f.call('GET','/api/me',{},previousCookie)).status,401);
+ f.admin.cookie=cookie;
  const member=await f.member('frontend-member@example.com');cookie=member.cookie;await run('loadSession()');await run("render('Today')");assert.ok(!element('#app').innerHTML.includes('data-route="Members"'));assert.ok(!element('#app').innerHTML.includes('data-route="Invitations"'));
  await run("render('Invitations')");assert.ok(element('#app').innerHTML.includes('Administrator access is required.'));
  }finally{f.db.close();}
@@ -121,4 +177,18 @@ test('static assets are cached before requests and do not read disk per request'
    assert.match(String(res.value),/^cached /);
   }
  }finally{fs.rmSync(folder,{recursive:true,force:true});}
+});
+
+test('JSON responses and errors escape markup without changing parsed values',async()=>{
+ const {Problem}=require('../src/server/service.cjs');
+ const value='<script>alert(1)</script>&';
+ for(const fail of [false,true]) {
+  const serve=handler({async dispatch(){if(fail)throw new Problem(400,value);return {status:200,body:{value}};}});
+  const req={method:'GET',url:'/api/me',headers:{}};
+  const res=response();
+  await serve(req,res);
+  assert.equal(res.headers['Content-Type'],'application/json; charset=utf-8');
+  assert.ok(!res.value.includes('<'));
+  assert.equal(JSON.parse(res.value)[fail?'error':'value'],value);
+ }
 });

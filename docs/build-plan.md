@@ -10,7 +10,7 @@ Current baseline: a live Node service with persistent SQLite storage, real invit
 
 The first slice uses dependency-free Node.js and SQLite rather than the initially proposed Next.js/PostgreSQL stack. This provides runnable persistence and tests within the current environment and one container, without scaffolding unused services. Node 24's built-in SQLite API remains experimental; pin the reviewed runtime for deployment. Revisit PostgreSQL and the worker architecture when background workloads and scale justify them. The stack below is the longer-term direction, not a list of installed dependencies.
 
-The first usable foundation is implemented. Next: verify container startup and browser flows on the Docker host, add password change/recovery and account administration, then implement robust document parsing and Gmail/Outlook connections. No email or search integration is enabled yet.
+The first usable foundation and password changing are implemented. Password changes verify the current password, rotate the current session and revoke all other sessions for that account. Next: verify container startup and browser flows on the Docker host, add password recovery and account administration, then implement robust document parsing and Gmail/Outlook connections. No email or search integration is enabled yet.
 
 ## Longer-term architecture
 

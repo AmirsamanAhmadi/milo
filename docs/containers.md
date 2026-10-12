@@ -2,15 +2,15 @@
 
 ## Start the live application
 
-The host needs Docker, Docker Compose and OpenSSL for local TLS setup. Build tools, tests, the web/API server and SQLite runtime are all inside containers.
+The host needs Docker, Docker Compose, Python 3.10 or newer and OpenSSL for local TLS setup. Build tools, tests, the web/API server and SQLite runtime are all inside containers.
 
 ```sh
-bash scripts/create-local-tls.sh
+python scripts/create-local-tls.py
 docker compose up --build -d
 docker compose exec milo node scripts/setup-admin.cjs
 ```
 
-The second command prompts for the first administrator's email, name and password. Password entry is hidden. Bootstrap stops working once any account exists; there is no public registration or default password.
+The administrator setup command prompts for the first administrator's email, name and password. Password entry is hidden. Bootstrap stops working once any account exists; there is no public registration or default password.
 
 Open https://localhost:8080 and sign in. Use **Invitations** to create a 72-hour, single-use link for a member. Copy the link when created; the secret is not stored in readable form or shown again. Deliver it yourself; invitation emails are not sent by Milo yet.
 
@@ -56,7 +56,7 @@ The initial release uses SQLite in `/data/milo.sqlite`. Documents are stored as 
 Create a consistent database backup, including uploaded files:
 
 ```sh
-docker compose exec milo node scripts/backup.cjs /data/milo-backup.sqlite
+docker compose exec milo python3 scripts/backup.py /data/milo-backup.sqlite
 docker compose cp milo:/data/milo-backup.sqlite ./milo-backup.sqlite
 ```
 
@@ -70,7 +70,7 @@ Node 24 provides the built-in SQLite API, which is still experimental in that re
 
 ## Validation
 
-`docker compose config --quiet` and `npm test` validate configuration and application behavior. Tests use real temporary SQLite databases and exercise the HTTP handler and browser script against the service; they do not replace real-browser tests. The editing environment cannot access its Docker engine, so the image build, container health check and browser startup still need verification on the Docker host.
+`docker compose config --quiet`, `npm test` and `python -m unittest discover -s tests -p 'test_*.py'` validate configuration and application behavior. Tests use real temporary SQLite databases and exercise the HTTP handler and browser script against the service; they do not replace real-browser tests. On 12 October 2026, the Docker image built successfully with all 10 service tests, prototype checks and 3 Python tests passing. The live container became healthy and its HTTPS health endpoint and login page returned HTTP 200. Full interactive browser QA remains outstanding.
 
 References: [Node 24 SQLite API](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html), [Docker multi-stage builds](https://docs.docker.com/build/building/multi-stage/), [Compose startup](https://docs.docker.com/reference/cli/docker/compose/up/).
 

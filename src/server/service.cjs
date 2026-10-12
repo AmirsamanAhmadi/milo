@@ -110,6 +110,22 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         return {status:201,body:{user:publicUser(u)},cookie:startSession(u)};
       }
       const user=authenticate(cookie);
+      if(path==='/api/me/password'&&method==='PUT') {
+        throttle('password:'+user.id);
+        if(!await verifyPassword(body.currentPassword,user.password_hash))fail(400,'Current password is incorrect.');
+        password(body.newPassword);
+        if(body.newPassword===body.currentPassword)fail(400,'Choose a different new password.');
+        const encoded=await hashPassword(body.newPassword);
+        const nextCookie=transaction(()=>{
+          // Recheck after asynchronous hashing so concurrent requests cannot overwrite a newer password.
+          authenticate(cookie);
+          const changed=db.prepare('UPDATE users SET password_hash=? WHERE id=? AND password_hash=?').run(encoded,user.id,user.password_hash);
+          if(!changed.changes)fail(409,'Your password changed. Sign in again.');
+          db.prepare('DELETE FROM sessions WHERE user_id=?').run(user.id);
+          return startSession(user);
+        });
+        return {status:200,body:{ok:true},cookie:nextCookie};
+      }
       if(path==='/api/me'&&method==='GET')return {status:200,body:{user:publicUser(user),stages,workplaces,types}};
       if(path==='/api/me'&&method==='PUT') {db.prepare('UPDATE users SET name=? WHERE id=?').run(text(body.name,'name',100,true),user.id);return {status:200,body:{user:publicUser(statement('SELECT * FROM users WHERE id=?',user.id))}};}
       if(path==='/api/logout'&&method==='POST') {const token=cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('milo_session='))?.slice(13);db.prepare('DELETE FROM sessions WHERE token_hash=?').run(digest(token));return {status:200,body:{ok:true},cookie:`milo_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure?'; Secure':''}`};}

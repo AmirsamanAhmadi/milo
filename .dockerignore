@@ -8,3 +8,5 @@
 !tests/**
 !docker/
 !docker/nginx.conf
+
+certs/

@@ -8,3 +8,5 @@ data/
 *.sqlite-wal
 *.sqlite-shm
 certs/
+__pycache__/
+*.pyc

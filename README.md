@@ -4,10 +4,10 @@ Milo is an invite-only, self-hosted career workspace. It keeps application recor
 
 ## Run the live app
 
-Requires Docker, Docker Compose and OpenSSL for local TLS setup:
+Requires Docker, Docker Compose, Python 3.10 or newer and OpenSSL for local TLS setup:
 
 ```sh
-bash scripts/create-local-tls.sh
+python scripts/create-local-tls.py
 docker compose up --build -d
 docker compose exec milo node scripts/setup-admin.cjs
 ```
@@ -26,12 +26,13 @@ Records survive container restarts in the `milo-data` named volume. See [Contain
 - Private PDF/DOCX/TXT uploads, authorized downloads/removal and reviewed CV text. TXT can fill the editor; PDF/Word extraction remains pending.
 - Job-specific custom cover-letter template builder, editing, persistent saving and TXT download.
 - Personal name editing, responsive layouts and light/dark mode.
+- Password changing with current-password verification and revocation of other sessions, available in **My account**.
 
 Each user's records and documents are protected by server-side ownership checks, including from administrators. The live app starts empty; it does not load fictional prototype records.
 
 ## Still being built
 
-Gmail/Outlook/Live sync, job-board extraction, AI assessments/writing, resume rendering, interview study recommendations, watchlist refresh and advanced analytics remain planned. The design preview demonstrates those workflows with fictional data. Password recovery, changing passwords, member suspension, scheduled backups, restore tooling, passkeys and SSO are not implemented yet.
+Gmail/Outlook/Live sync, job-board extraction, AI assessments/writing, resume rendering, interview study recommendations, watchlist refresh and advanced analytics remain planned. The design preview demonstrates those workflows with fictional data. Password recovery, member suspension, scheduled backups, restore tooling, passkeys and SSO are not implemented yet.
 
 ## Design preview
 
@@ -61,10 +62,14 @@ For local checks, Node.js 24 or newer is required; there are no package dependen
 
 ```sh
 npm test
+python -m unittest discover -s tests -p 'test_*.py'
 ```
 
 `src/server/` contains persistence, account/workspace services and HTTP endpoints. `src/live/` contains the live interface. The original prototype stays in `src/app.js`, `src/features.js`, `src/career.js` and `src/styles.css`; its generator is `scripts/build-preview.cjs`.
 
-Tests check invitations, authentication, ownership isolation, persistent storage, uploads, letters, origin checks, throttling, HTTP responses and the interface's application-save flow. Full browser QA and actual Docker startup verification remain outstanding. Preserve `AGENTS.md`.
+Tests check invitations, authentication, ownership isolation, persistent storage, uploads, letters, origin checks, throttling, HTTP responses and the interface's application-save flow. Docker build, container health and HTTPS startup were verified on 12 October 2026. Full browser QA remains outstanding. Preserve `AGENTS.md`.
 
 Local TLS uses a disposable self-signed certificate valid for 30 days. Trust `certs/cert.pem` in your local browser before signing in. The generator preserves existing certificates. For production, use a trusted certificate and protect its private key with file permissions that allow only the operator and container user (UID 1000) to read it. Never commit TLS keys. Set `MILO_TLS_KEY` and `MILO_TLS_CERT` for direct Node execution.
+
+
+Backup and local TLS setup now use Python's standard library (Python 3.10+), with no pip dependencies. The container includes Python. The live service, administrator setup, browser interface and preview generator retain JavaScript. Legacy backup and shell TLS commands remain available for compatibility. Python backups refuse to overwrite existing files; choose a fresh destination each time.

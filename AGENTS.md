@@ -2,13 +2,13 @@
 
 ## Project Structure & Module Organization
 
-This directory currently contains no source code, tests, assets, or project configuration. Establish the layout when adding the first implementation, and update this guide to match it.
+Application code lives in `src/server/` (Node.js/SQLite service) and `src/live/` (live browser interface). The original design prototype lives in the top-level `src/` files, with generated pages in `preview/`. Automated tests live in `tests/`, utility scripts in `scripts/`, container configuration in `docker/`, and supporting documentation in `docs/`.
 
 Use `src/` for application code, `tests/` for automated tests, `assets/` for static resources, and `docs/` for supporting documentation where applicable. Keep related modules together and avoid introducing directories without a concrete purpose.
 
 ## Build, Test, and Development Commands
 
-No build system, package manager, or development commands are configured yet. When selecting a stack, document the exact installation, local execution, build, and test commands in `README.md`.
+Requires Node.js 24 or newer; no package dependencies need installation. Run `npm test` for preview generation and prototype/service tests, `npm run build:preview` to regenerate the preview, and `npm start` for the server with the documented TLS/environment settings. Run `docker build --target build -t milo-checks .` for container checks. See `README.md` for Docker Compose startup and administrator setup.
 
 Provide repeatable commands through the chosen package manager or build tool. Do not assume commands such as `npm test` or `make build` work until their configuration exists. Document required runtime versions alongside setup instructions.
 
@@ -20,7 +20,7 @@ Use descriptive names for files, modules, and functions. Keep indentation consis
 
 ## Testing Guidelines
 
-No test framework or coverage threshold is currently defined. Select a framework appropriate to the implementation and document how to run it.
+Service tests use Node's built-in test runner; prototype checks use Node assertions. `npm test` runs both. Python utility tests require Python 3.10 or newer and run with `python -m unittest discover -s tests -p 'test_*.py'`. Docker builds run all suites. No coverage threshold is configured.
 
 Add meaningful tests for new behavior and regression tests for bug fixes. Name tests after the behavior they verify, and keep fixtures small and deterministic. State any required services or environment variables in the setup documentation.
 
