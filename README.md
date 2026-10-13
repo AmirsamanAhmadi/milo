@@ -1,6 +1,6 @@
 # Milo
 
-Milo is an self-hosted, self-hosted career workspace. It keeps application records, private CVs, role preferences and custom cover letters together, with a responsive light/dark interface.
+Milo is a self-hosted career workspace. It keeps application records, private CVs, role preferences and custom cover letters together, with a responsive light/dark interface.
 
 ## Run the live app
 
