@@ -1,6 +1,6 @@
 # Milo
 
-**Company websites only** is available as an optional job source. Discover employer career pages through a configured Google-results connection, or paste company URLs to search without a key. See [Company-only job search](docs/company-job-search.md) for setup and supported employer portals.
+**Company websites only** is available as an optional job source. Selecting it automatically discovers employer career pages from your roles and location, reads the postings and ranks them against your CV. An administrator configures the shared Google-results connection once through Settings → Company search; users do not need company links or API keys. See [Company-only job search](docs/company-job-search.md) for setup and supported employer portals.
 
 Milo is a self-hosted career workspace. It keeps application records, private CVs, role preferences and custom cover letters together, with a responsive light/dark interface.
 

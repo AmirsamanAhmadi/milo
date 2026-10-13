@@ -548,22 +548,34 @@ test('analytics empty rates remain unknown and direct offers do not invent inter
  assert.equal(result.responseTimingSample,0);assert.equal(result.companies[0].submitted,1);
 });
 
-test('company-only searches remain separate, validate settings and require Google configuration only for discovery',async()=>{
+test('company-only searches automatically discover employers without user links and keep credentials private',async()=>{
  const previous=process.env.SERPER_API_KEY;delete process.env.SERPER_API_KEY;
- let captured;const f=await fixture(':memory:',{jobSearch:async settings=>{captured=settings;return {jobs:[{role:'Python Engineer',company:'Employer',url:'https://example.com/careers/python',description:'Build Python applications with SQL and Docker for customer teams. Deliver reliable services, maintain production applications and improve reporting with measurable software engineering results.',location:'Auckland, NZ',remote:false,source:'Company websites only',sourceKind:'Employer website',employerWebsite:'https://example.com/careers'}],hasMore:false,discovery:'Company URLs',checkedSites:1};}});
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'milo-workspace-search-'));
+ const {createVault}=require('../src/server/provider-settings.cjs');
+ let captured,connection;const f=await fixture(':memory:',{credentialVault:createVault(directory),jobSearch:async(settings,credentials)=>{captured=settings;connection=credentials;return {jobs:[],hasMore:false};}});
  try{
   const settings={provider:'Company websites only',query:'Python',location:'',country:'new zealand',page:1,remote:false};
-  assert.equal((await f.call('POST','/api/jobs/search',settings,f.admin.cookie)).status,503);assert.equal(captured,undefined);
-  assert.equal((await f.call('POST','/api/jobs/search',{...settings,companyUrls:['http://example.com/careers']},f.admin.cookie)).status,400);
-  assert.equal((await f.call('POST','/api/jobs/search',{...settings,companyUrls:['https://example.com/careers'],includePortals:'yes'},f.admin.cookie)).status,400);
-  const result=await f.call('POST','/api/jobs/search',{...settings,companyUrls:['https://example.com/careers'],includePortals:false},f.admin.cookie);
-  assert.equal(result.status,200);assert.equal(captured.provider,'Company websites only');assert.equal(captured.includePortals,false);
-  assert.deepEqual(captured.companyUrls,['https://example.com/careers']);assert.equal(captured.countryCode,'NZ');
-  assert.equal(result.body.jobs[0].employerWebsite,'https://example.com/careers');assert.equal(result.body.jobs[0].sourceKind,'Employer website');
-  process.env.SERPER_API_KEY='fixture-search-key';
-  assert.equal((await f.call('POST','/api/jobs/search',settings,f.admin.cookie)).status,200);
-  const providers=await f.call('GET','/api/jobs/providers',{},f.admin.cookie);
-  assert.equal(providers.body.providers.find(p=>p.name==='Company websites only').discoveryConfigured,true);
-  assert.ok(!JSON.stringify(providers).includes('fixture-search-key'));
- }finally{f.db.close();if(previous===undefined)delete process.env.SERPER_API_KEY;else process.env.SERPER_API_KEY=previous;}
+  const unconfigured=await f.call('POST','/api/jobs/search',settings,f.admin.cookie);assert.equal(unconfigured.status,503);assert.ok(!unconfigured.body.error.includes('URLs'));assert.equal(captured,undefined);
+  const member=await f.member('company-search@example.com');
+  const key=randomBytes(24).toString('hex');
+  assert.equal((await f.call('PUT','/api/admin/search',{apiKey:key},member.cookie)).status,403);
+  assert.equal((await f.call('GET','/api/admin/search',{},member.cookie)).status,403);
+  assert.equal((await f.call('PUT','/api/admin/search',{apiKey:key},f.admin.cookie,{requestOrigin:'https://foreign.example'})).status,403);
+  const saved=await f.call('PUT','/api/admin/search',{apiKey:key},f.admin.cookie);assert.equal(saved.status,200);assert.equal(saved.body.configured,true);assert.ok(!JSON.stringify(saved).includes(key));
+  assert.notEqual(f.db.prepare('SELECT encrypted_key FROM workspace_search').get().encrypted_key,key);
+  const result=await f.call('POST','/api/jobs/search',{...settings,includePortals:false,companyUrls:['https://wrong.example/']},member.cookie);
+  assert.equal(result.status,200);assert.equal(captured.provider,'Company websites only');assert.equal(captured.companyUrls,undefined);assert.equal(captured.includePortals,false);assert.equal(captured.countryCode,'NZ');assert.equal(connection.serperApiKey,key);
+  const providers=await f.call('GET','/api/jobs/providers',{},member.cookie);assert.equal(providers.body.providers.find(p=>p.name==='Company websites only').discoveryConfigured,true);assert.ok(!JSON.stringify(providers).includes(key));
+  await f.call('PUT','/api/admin/search',{apiKey:'',removeKey:true},f.admin.cookie);assert.equal((await f.call('GET','/api/admin/search',{},f.admin.cookie)).body.configured,false);
+  process.env.SERPER_API_KEY=key;assert.equal((await f.call('POST','/api/jobs/search',settings,member.cookie)).status,200);
+ }finally{f.db.close();fs.rmSync(directory,{recursive:true,force:true});if(previous===undefined)delete process.env.SERPER_API_KEY;else process.env.SERPER_API_KEY=previous;}
+});
+
+test('rotating the shared company search connection does not reuse results from another credential',async()=>{
+ const {createJobSearch}=require('../src/server/jobs.cjs');let calls=0;
+ const search=createJobSearch({fetchJobs:async(settings,credentials)=>{calls++;assert.equal(settings.serperApiKey,undefined);assert.ok(credentials.serperApiKey);return {jobs:[],hasMore:false};}});
+ const settings={provider:'Company websites only',query:'Python',location:'',country:'new zealand',page:1,remote:false};
+ const first=randomBytes(24).toString('hex'),next=randomBytes(24).toString('hex');
+ await search(settings,{serperApiKey:first});await search(settings,{serperApiKey:first});assert.equal(calls,1);
+ await search(settings,{serperApiKey:next});assert.equal(calls,2);
 });

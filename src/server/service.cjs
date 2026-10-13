@@ -66,6 +66,8 @@ function applicationInput(data) {
 function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now(), jobSearch=createJobSearch(), adzunaConfigured=Boolean(process.env.ADZUNA_APP_ID&&process.env.ADZUNA_APP_KEY), seekConfigured=Boolean(process.env.APIFY_TOKEN), aiGenerator=generateAI, aiConfigured=Boolean(process.env.OPENAI_API_KEY&&process.env.OPENAI_MODEL), aiModel=process.env.OPENAI_MODEL||'', credentialVault=null, documentExporter=exportDocument }={}) {
   let aiActive=0,exportActive=0;
   const vault=credentialVault||createVault();
+  function searchKey(){const row=db.prepare('SELECT encrypted_key FROM workspace_search WHERE id=1').get();return row?vault.decrypt(row.encrypted_key):process.env.SERPER_API_KEY||'';}
+  function searchStatus(){const row=db.prepare('SELECT updated_at FROM workspace_search WHERE id=1').get();return {configured:Boolean(row||process.env.SERPER_API_KEY),storedKey:Boolean(row),serverKey:Boolean(process.env.SERPER_API_KEY),updatedAt:row?.updated_at||null};}
   function aiConfiguration(user,includeKey=false){
     const saved=db.prepare('SELECT * FROM user_ai WHERE user_id=?').get(user.id);
     const provider=saved?.provider||'OpenAI',model=saved?.model||(provider==='Local AI'?process.env.LOCAL_AI_MODEL:provider==='ChatGPT'?'':aiModel)||'';
@@ -227,7 +229,7 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         db.prepare('INSERT INTO job_toolkits VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(user_id,job_key) DO UPDATE SET job=excluded.job,assessment=excluded.assessment,tailored_cv=excluded.tailored_cv,cover_letter=excluded.cover_letter,cv_hash=excluded.cv_hash,updated_at=excluded.updated_at').run(user.id,key,JSON.stringify(job),drafts.assessment?JSON.stringify(drafts.assessment):null,drafts.tailoredCV,drafts.coverLetter,drafts.cvHash,iso(now()));
         return {status:200,body:{job,...drafts,ai:aiConfiguration(user)}};
       }
-      if(path==='/api/jobs/providers'&&method==='GET')return {status:200,body:{providers:[...['All available','Indeed','LinkedIn','Glassdoor','Working Nomads','Arbeitnow'].map(name=>({name,available:true})),{name:'Company websites only',available:true,discoveryConfigured:Boolean(process.env.SERPER_API_KEY)},{name:'Adzuna NZ',available:adzunaConfigured},{name:'SEEK',available:seekConfigured}]}};
+      if(path==='/api/jobs/providers'&&method==='GET')return {status:200,body:{providers:[...['All available','Indeed','LinkedIn','Glassdoor','Working Nomads','Arbeitnow'].map(name=>({name,available:true})),{name:'Company websites only',available:true,discoveryConfigured:searchStatus().configured},{name:'Adzuna NZ',available:adzunaConfigured},{name:'SEEK',available:seekConfigured}]}};
       if(path==='/api/jobs/search'&&method==='POST') {
         throttle('jobs:'+user.id);
         const provider=body.provider;
@@ -242,17 +244,13 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         if(!Number.isInteger(page)||page<1||page>10||typeof body.remote!=='boolean')fail(400,'Choose valid search filters.');
         let companyOptions={};
         if(provider==='Company websites only'){
-          const companyUrls=body.companyUrls||[];
-          if(!Array.isArray(companyUrls)||companyUrls.length>6||companyUrls.some(url=>typeof url!=='string'||url.length>2000))fail(400,'Enter up to six company career URLs.');
-          for(const value of companyUrls){try{const u=new URL(value);if(u.protocol!=='https:'||u.username||u.password||u.port&&u.port!=='443')throw Error();}catch{fail(400,'Use public HTTPS company career URLs.');}}
           if(body.includePortals!==undefined&&typeof body.includePortals!=='boolean')fail(400,'Choose whether to include linked employer career portals.');
-          if(companyUrls.length&&page!==1)fail(400,'Company URL searches use one page.');
-          if(!companyUrls.length&&!process.env.SERPER_API_KEY)fail(503,'Google discovery needs an administrator search API connection. Enter company career URLs to search without it.');
-          if(!companyUrls.length&&!query)fail(400,'Enter a target role for Google company discovery.');
-          companyOptions={companyUrls,includePortals:body.includePortals??true,countryCode:countryFor(country).code,countryName:countryFor(country).name};
+          if(!searchStatus().configured)fail(503,'Company job discovery is not connected yet. An administrator can enable it in Settings → Company search.');
+          if(!query)fail(400,'Choose a role suggested by your CV or enter a target role.');
+          companyOptions={includePortals:body.includePortals??true,countryCode:countryFor(country).code,countryName:countryFor(country).name};
         }
         let result;
-        try{result=await jobSearch({provider,query,location,page,remote:body.remote,country,...companyOptions});}
+        try{result=await jobSearch({provider,query,location,page,remote:body.remote,country,...companyOptions},provider==='Company websites only'?{serperApiKey:searchKey()}:{});}
         catch{fail(502,'The job provider is unavailable. Try again later.');}
         const cv=await cvText(user);
         let assessment;
@@ -297,6 +295,19 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
       if(path==='/api/logout'&&method==='POST') {const token=cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('milo_session='))?.slice(13);db.prepare('DELETE FROM sessions WHERE token_hash=?').run(digest(token));return {status:200,body:{ok:true},cookie:`milo_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure?'; Secure':''}`};}
       if(path.startsWith('/api/admin/')) {
         if(user.role!=='admin')fail(403,'Administrator access is required.');
+        if(path==='/api/admin/search'&&method==='GET')return {status:200,body:searchStatus()};
+        if(path==='/api/admin/search'&&method==='PUT'){
+          throttle('search-settings:'+user.id);
+          if(body.removeKey!==undefined&&typeof body.removeKey!=='boolean')fail(400,'Choose whether to remove the saved connection.');
+          const key=text(body.apiKey??'','search API key',256);
+          if(body.removeKey&&key)fail(400,'Save a new key or remove the old one.');
+          if(body.removeKey)db.prepare('DELETE FROM workspace_search WHERE id=1').run();
+          else if(key){
+            if(!/^[\x21-\x7e]{16,256}$/.test(key))fail(400,'Enter a valid search API key.');
+            db.prepare('INSERT INTO workspace_search VALUES (1,?,?,?) ON CONFLICT(id) DO UPDATE SET encrypted_key=excluded.encrypted_key,updated_by=excluded.updated_by,updated_at=excluded.updated_at').run(vault.encrypt(key),user.id,iso(now()));
+          }else if(!searchStatus().configured)fail(400,'Enter your search API key to connect.');
+          return {status:200,body:searchStatus()};
+        }
         if(path==='/api/admin/members'&&method==='GET')return {status:200,body:{members:db.prepare('SELECT id,name,email,role,created_at FROM users ORDER BY created_at').all()}};
         const reset=path.match(/^\/api\/admin\/members\/([a-f0-9-]+)\/password$/);
         if(reset&&method==='PUT'){

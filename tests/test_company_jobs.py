@@ -70,7 +70,7 @@ class CompanyJobTests(unittest.TestCase):
         self.assertEqual(len(result['jobs']),1);self.assertEqual(result['discovery'],'Google via Serper')
         self.assertEqual(calls,['https://example.com/careers','https://example.com/careers/python'])
 
-    def test_manual_company_urls_need_no_search_key_and_portals_are_optional(self):
+    def test_automatic_discovery_finds_employer_pages_and_portals_are_optional(self):
         class Client:
             def __init__(self,deadline):pass
             def page(self,url,permitted):return 200,'<a href="https://jobs.lever.co/example">Company roles</a>',url
@@ -78,8 +78,8 @@ class CompanyJobTests(unittest.TestCase):
                 self_test=kwargs['permitted'](url)
                 if not self_test:raise ValueError('Unexpected API')
                 return 200,json.dumps([{'text':'Python Engineer','hostedUrl':'https://jobs.lever.co/example/123','descriptionPlain':posting()['description'],'categories':{'location':'Auckland'},'country':'NZ'}]),url
-        settings={'query':'Python','page':1,'country':'new zealand','countryCode':'NZ','companyUrls':['https://example.com/careers']}
-        discover=lambda *args: self.fail('Manual search must not call Google')
+        settings={'query':'Python','page':1,'country':'new zealand','countryCode':'NZ'}
+        discover=lambda *args: (['https://example.com/careers'],False)
         yes=company.fetch_company_jobs(settings,client_factory=Client,discover=discover)
         self.assertEqual(len(yes['jobs']),1);self.assertEqual(yes['jobs'][0]['sourceKind'],'Linked employer career portal')
         self.assertEqual(yes['jobs'][0]['employerWebsite'],'https://example.com/careers')

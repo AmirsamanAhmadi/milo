@@ -268,13 +268,7 @@ def portal_belongs_to_employer(url, employer, documents):
 def fetch_company_jobs(settings, client_factory=PublicClient, discover=google_discover):
     deadline = time.monotonic() + 18
     client = client_factory(deadline)
-    seeds = settings.get('companyUrls') or []
-    manual = bool(seeds)
-    if manual and settings.get('page', 1) != 1:
-        return {'jobs': [], 'hasMore': False, 'warning': 'Company URL searches use one bounded crawl.'}
-    has_more = False
-    if not manual:
-        seeds, has_more = discover(settings, client)
+    seeds, has_more = discover(settings, client)
     accepted, warnings, seen = [], [], set()
     for seed in seeds:
         try:
@@ -329,4 +323,4 @@ def fetch_company_jobs(settings, client_factory=PublicClient, discover=google_di
                 seen.add(job['url']);jobs.append(job)
     if not jobs:
         warnings.append('No readable, current employer postings were verified. Some career sites require JavaScript or do not publish structured job details; this does not prove there are no vacancies.')
-    return {'jobs': jobs[:100], 'hasMore': has_more if not manual else False, 'warning': ' '.join(dict.fromkeys(warnings))[:2000], 'discovery': 'Company URLs' if manual else 'Google via Serper', 'checkedSites': len(accepted[:6])}
+    return {'jobs': jobs[:100], 'hasMore': has_more, 'warning': ' '.join(dict.fromkeys(warnings))[:2000], 'discovery': 'Google via Serper', 'checkedSites': len(accepted[:6])}

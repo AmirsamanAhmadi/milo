@@ -74,7 +74,8 @@ function openStore(filename, localOnly = false) {
     CREATE TABLE IF NOT EXISTS email_clients (user_id TEXT NOT NULL REFERENCES users(id),provider TEXT NOT NULL,client_id TEXT NOT NULL,encrypted_secret TEXT NOT NULL,PRIMARY KEY(user_id,provider));
     CREATE TABLE IF NOT EXISTS cover_profiles (user_id TEXT PRIMARY KEY REFERENCES users(id),text TEXT NOT NULL,updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS password_reset_events (id TEXT PRIMARY KEY,actor_id TEXT NOT NULL REFERENCES users(id),target_id TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL);
-    PRAGMA user_version=6;`);
+    CREATE TABLE IF NOT EXISTS workspace_search (id INTEGER PRIMARY KEY CHECK(id=1),encrypted_key TEXT NOT NULL,updated_by TEXT NOT NULL REFERENCES users(id),updated_at TEXT NOT NULL);
+    PRAGMA user_version=7;`);
   return db;
 }
 module.exports = { openStore };
