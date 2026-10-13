@@ -102,7 +102,7 @@ if(!base||!process.env.MILO_UI_FIXTURE)throw Error('Set MILO_UI_URL and MILO_UI_
   await page.goto(base+'/#Analytics');await page.getByRole('heading',{name:'Your application insights.'}).waitFor();
   assert.ok(await page.locator('svg[role="img"]').count()>=2);assert.ok(await page.getByRole('heading',{name:'Company response history',exact:true}).isVisible());
   await page.locator('#analytics-period').selectOption('30');await page.locator('#analytics-period').waitFor();await page.waitForTimeout(700);
-  const analytics=await page.evaluate(()=>fetch('/api/analytics?days=30').then(r=>r.json()));assert.equal(analytics.counts.submitted,1);assert.equal(analytics.responseRate,100);assert.equal(analytics.counts.interviews,1);assert.ok(analytics.timeline.some(month=>month.submitted===1&&month.responses===1));
+  const analytics=await page.evaluate(()=>fetch('/api/analytics?days=30').then(r=>r.json()));assert.equal(analytics.counts.submitted,1);assert.equal(analytics.responseRate,100);assert.equal(analytics.counts.interviews,1);assert.equal(analytics.timeline.reduce((n,month)=>n+month.submitted,0),1);assert.equal(analytics.timeline.reduce((n,month)=>n+month.responses,0),1);
   await page.locator('#notice').evaluate(element=>element.textContent='');
   await page.screenshot({path:output+'/analytics.png',fullPage:true});
   const publicContext=await browser.newContext({viewport:{width:1000,height:900}}),publicPage=await publicContext.newPage();
