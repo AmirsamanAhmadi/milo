@@ -53,3 +53,31 @@ class ExportTests(unittest.TestCase):
     def test_missing_template_is_disclosed_and_empty_draft_is_rejected(self):
         self.assertTrue(render({'text':'Plain draft','format':'docx'})['warnings'])
         with self.assertRaises(ValueError):render({'text':'','format':'docx'})
+
+    def test_reordered_sections_and_extra_lines_stay_in_original_table_cells(self):
+        from docx import Document
+        d=Document()
+        d.add_paragraph('Ada Example',style='Title')
+        table=d.add_table(rows=1,cols=2)
+        left,right=table.rows[0].cells
+        left.paragraphs[0].text='Skills'
+        left.paragraphs[0].style='Heading 1'
+        left.add_paragraph('Python and SQL')
+        right.paragraphs[0].text='Experience'
+        right.paragraphs[0].style='Heading 1'
+        p=right.add_paragraph()
+        p.add_run('Engineer').bold=True
+        p.add_run(' at Example Ltd').italic=True
+        right.add_paragraph('Built an API')
+        d.add_paragraph('Education',style='Heading 1')
+        d.add_paragraph('BSc Computing')
+        output=io.BytesIO();d.save(output)
+        result=render({'text':'Ada Example\nExperience\nEngineer at Example Ltd\nBuilt a secure API\nReduced latency by 30%\nSkills\nPython and SQL\nDocker\nEducation\nBSc Computing','format':'docx','template':{'kind':'docx','base64':base64.b64encode(output.getvalue()).decode()}})
+        exported=Document(io.BytesIO(base64.b64decode(result['base64'])))
+        left,right=exported.tables[0].rows[0].cells
+        self.assertEqual(left.text,'Skills\nPython and SQL\nDocker')
+        self.assertEqual(right.text,'Experience\nEngineer at Example Ltd\nBuilt a secure API\nReduced latency by 30%')
+        self.assertTrue(right.paragraphs[1].runs[0].bold)
+        self.assertTrue(right.paragraphs[1].runs[-1].italic)
+        self.assertEqual(exported.paragraphs[-2].style.name,'Heading 1')
+        self.assertEqual(exported.paragraphs[-1].text,'BSc Computing')

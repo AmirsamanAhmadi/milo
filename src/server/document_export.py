@@ -60,54 +60,111 @@ def create_document(template):
     return document, warnings
 
 def replace_body(document, text):
+    from difflib import SequenceMatcher
     from docx.oxml.ns import qn
     from docx.text.paragraph import Paragraph
     lines = [re.sub(r'^#{1,6}\s+', '', line).strip() for line in text.splitlines() if line.strip()]
-    slots = [Paragraph(element, document) for element in document.element.body.iter(qn('w:p')) if Paragraph(element, document).text.strip()]
+    slots = [Paragraph(e, document) for e in document.element.body.iter(qn('w:p')) if Paragraph(e, document).text.strip()]
     if not slots:
         for index, line in enumerate(lines):
-            heading = len(line)<60 and (line.isupper() or line.lower().rstrip(':') in ('experience','skills','education','summary','qualifications','certifications'))
-            document.add_paragraph(line, style='Title' if index==0 and len(line)<60 else 'Heading 1' if heading else 'Normal')
+            heading = len(line) < 60 and (line.isupper() or line.lower().rstrip(':') in ('experience', 'skills', 'education', 'summary', 'qualifications', 'certifications'))
+            document.add_paragraph(line, style='Title' if index == 0 and len(line) < 60 else 'Heading 1' if heading else 'Normal')
         return
-    body = deepcopy(next((p._p for p in reversed(slots) if not p.style.name.lower().startswith('heading')), slots[-1]._p))
-    headings = {p.text.strip().casefold(): (deepcopy(p._p.pPr),deepcopy(p.runs[0]._r.rPr) if p.runs else None) for p in slots if 'heading' in p.style.name.lower() or p.text.strip().casefold() in ('experience','skills','education','summary','qualifications','certifications')}
-    for index, paragraph in enumerate(slots):
-        line = lines[index] if index < len(lines) else ''
-        properties = deepcopy(next((run._r.rPr for run in paragraph.runs if run.text and run._r.rPr is not None), None))
-        if line.casefold() in headings:
-            paragraph_properties,properties = deepcopy(headings[line.casefold()])
-            if paragraph._p.pPr is not None:
-                paragraph._p.remove(paragraph._p.pPr)
-            if paragraph_properties is not None:
-                paragraph._p.insert(0,paragraph_properties)
-        # Keep paragraph styles, table cells and drawings; remove the original text.
+
+    def key(value):
+        value = re.sub(r'[^a-z ]', '', value.casefold()).strip()
+        return {'professional experience': 'experience', 'work experience': 'experience', 'professional summary': 'summary', 'profile': 'summary', 'technical skills': 'skills', 'core skills': 'skills'}.get(value, value)
+
+    def write(paragraph, value):
+        # Map matching characters back to their original runs, retaining mixed emphasis.
+        runs = list(paragraph.runs)
+        original = paragraph.text
+        formats = []
+        for run in runs:
+            formats.extend([run._r.rPr] * len(run.text))
+        if not formats:
+            formats = [None] * max(1, len(original))
+        style_at = [None] * len(value)
+        matcher = SequenceMatcher(None, original, value, autojunk=False)
+        for tag, a, b, c, d in matcher.get_opcodes():
+            for i in range(c, d):
+                source = a + (i - c) if tag == 'equal' else min(a, len(formats) - 1)
+                style_at[i] = formats[min(source, len(formats) - 1)]
         for child in list(paragraph._p):
             if child.tag == qn('w:pPr'):
                 continue
-            if list(child.iter(qn('w:drawing'))):
+            if list(child.iter(qn('w:drawing'))) or list(child.iter(qn('w:pict'))):
                 for node in child.iter(qn('w:t')):
                     node.text = ''
             else:
                 paragraph._p.remove(child)
-        if line:
-            run = paragraph.add_run(line)
-            if properties is not None:
-                run._r.insert(0, properties)
-    for line in lines[len(slots):]:
-        cloned = deepcopy(body)
-        document.element.body.insert(len(document.element.body) - 1, cloned)
-        paragraph = Paragraph(cloned, document)
-        properties = deepcopy(paragraph.runs[0]._r.rPr) if paragraph.runs else None
-        paragraph.clear()
-        if line.casefold() in headings:
-            paragraph_properties,properties = deepcopy(headings[line.casefold()])
-            if paragraph._p.pPr is not None:
-                paragraph._p.remove(paragraph._p.pPr)
-            if paragraph_properties is not None:
-                paragraph._p.insert(0,paragraph_properties)
-        run = paragraph.add_run(line)
-        if properties is not None:
-            run._r.insert(0, properties)
+        offset = 0
+        while offset < len(value):
+            end = offset + 1
+            while end < len(value) and style_at[end] is style_at[offset]:
+                end += 1
+            run = paragraph.add_run(value[offset:end])
+            if style_at[offset] is not None:
+                run._r.insert(0, deepcopy(style_at[offset]))
+            offset = end
+
+    def fill(paragraphs, values, section=True):
+        if not paragraphs:
+            return
+        # Insert overflow next to its section, inside the same table cell/column.
+        prototype = next((p for p in reversed(paragraphs) if not p.style.name.lower().startswith(('heading', 'title'))), paragraphs[-1])
+        anchor = paragraphs[-1]._p
+        if not section:
+            prototype = next((p for p in reversed(paragraphs) if p._p.getparent() is document.element.body and not p.style.name.lower().startswith(('heading', 'title'))), paragraphs[0])
+            anchor = document.element.body[-2] if document.element.body[-1].tag == qn('w:sectPr') else document.element.body[-1]
+        for index, value in enumerate(values):
+            if index < len(paragraphs):
+                paragraph = paragraphs[index]
+            else:
+                cloned = deepcopy(prototype._p)
+                # A cloned text paragraph must not duplicate pictures or bookmarks.
+                for tag in ('w:drawing', 'w:pict', 'w:bookmarkStart', 'w:bookmarkEnd'):
+                    for node in list(cloned.iter(qn(tag))):
+                        node.getparent().remove(node)
+                anchor.addnext(cloned)
+                anchor = cloned
+                paragraph = Paragraph(cloned, prototype._parent)
+            write(paragraph, value)
+        for paragraph in paragraphs[len(values):]:
+            write(paragraph, '')
+
+    anchors = [(i, key(p.text)) for i, p in enumerate(slots) if 'heading' in p.style.name.lower() or key(p.text) in ('experience', 'skills', 'education', 'summary', 'qualifications', 'certifications', 'projects')]
+    known = {name for _, name in anchors}
+    draft_anchors = [(i, key(line)) for i, line in enumerate(lines) if key(line) in known]
+    if not anchors or not draft_anchors:
+        fill(slots, lines, section=False)
+        return
+    sections = {}
+    for position, (index, name) in enumerate(draft_anchors):
+        stop = draft_anchors[position + 1][0] if position + 1 < len(draft_anchors) else len(lines)
+        sections.setdefault(name, []).extend(lines[index + 1:stop])
+    preamble = slots[:anchors[0][0]]
+    preamble_lines = lines[:draft_anchors[0][0]]
+    if not preamble and preamble_lines:
+        cloned = deepcopy(slots[0]._p)
+        slots[0]._p.addprevious(cloned)
+        paragraph = Paragraph(cloned, slots[0]._parent)
+        paragraph.style = document.styles['Normal']
+        preamble = [paragraph]
+    fill(preamble, preamble_lines)
+    for position, (index, name) in enumerate(anchors):
+        stop = anchors[position + 1][0] if position + 1 < len(anchors) else len(slots)
+        values = sections.pop(name, [])
+        paragraphs = slots[index + 1:stop]
+        if not paragraphs:
+            # Heading-only sections gain a body paragraph immediately below the heading.
+            cloned = deepcopy(slots[index]._p)
+            slots[index]._p.addnext(cloned)
+            paragraph = Paragraph(cloned, slots[index]._parent)
+            paragraph.style = document.styles['Normal']
+            paragraphs = [paragraph]
+        fill(paragraphs, values)
+    # Repeated headings are kept in their original locations; no draft text is lost.
 
 def render(data):
     text = data.get('text', '').strip()

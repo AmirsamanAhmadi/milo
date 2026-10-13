@@ -7,6 +7,6 @@
   "scripts": {
     "start": "node src/server/main.cjs",
     "build:preview": "node scripts/build-preview.cjs",
-    "test": "node scripts/build-preview.cjs && node tests/prototype.test.cjs && node --test tests/server.test.cjs"
+    "test": "node scripts/build-preview.cjs && node tests/prototype.test.cjs && node --test tests/server.test.cjs tests/database.test.cjs"
   }
 }

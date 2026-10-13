@@ -2,7 +2,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
-function openStore(filename) {
+function openStore(filename, localOnly = false) {
+  if (process.env.MILO_DB_SOCKET && !localOnly) return require('./database-client.cjs').connectStore(process.env.MILO_DB_SOCKET);
   if (filename !== ':memory:') fs.mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(filename, { timeout: 5000 });
   db.exec(`PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;

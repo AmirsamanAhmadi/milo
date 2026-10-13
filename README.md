@@ -12,7 +12,7 @@ docker compose up --build -d
 
 Open http://localhost:8080/#Signup to create your first administrator in the browser; signup signs you in automatically. `docker compose exec milo node scripts/setup-admin.cjs` is the interactive alternative. Signup closes as soon as any account exists. There are no default credentials. Administrators create member invitation links through **Invitations**; links expire after 72 hours and can be accepted only once.
 
-Records survive container restarts in the `milo-data` named volume. See [Container setup](docs/containers.md) for server origins, ports, backups and the optional preview.
+The web application and SQLite database run in separate containers, connected by a private socket. Records survive container restarts in the existing `milo-data` named volume. See [Container setup](docs/containers.md) for server origins, ports, backups and the optional preview.
 
 ## HTTPS through your reverse proxy
 
@@ -94,3 +94,5 @@ python scripts/check-live-ui.py
 This optional command requires host Python 3.10+ and a running Compose network. It builds its own Chromium test image and never mounts live data. Preserve `AGENTS.md`. Backup utilities use Python's standard library; see [Container setup](docs/containers.md). Never commit credentials, local environment files, databases or TLS private keys.
 
 See [the interface review](docs/ui-review.md) for worldwide location/currency suggestions, sponsorship filtering, CV recommendations, job saving, interview materials and browser verification. Gmail and Outlook connections require the [email OAuth setup](docs/email-sync.md).
+
+The Job toolkit provides a three-step workflow for the job brief, assessment and draft review. Cover letters have a dedicated writing workspace with word counts and text previews. DOCX exports align draft sections with original template sections, keeping tables, paragraph styles and mixed run formatting. PDF-source layouts remain approximate; use the original DOCX for editable template preservation.

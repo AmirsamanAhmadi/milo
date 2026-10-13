@@ -20,7 +20,7 @@ function handler(service,{assetsDir=path.resolve(__dirname,'../live')}={}) {
     res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     try {
       const url=new URL(req.url,'http://localhost');
-      if(url.pathname==='/health'&&req.method==='GET'){res.setHeader('Content-Type','text/plain');res.end('ok');return;}
+      if(url.pathname==='/health'&&req.method==='GET'){try{service.health?.();}catch{res.statusCode=503;res.end('Database unavailable');return;}res.setHeader('Content-Type','text/plain');res.end('ok');return;}
       if(req.method==='GET'&&assets[url.pathname]) {
         const {type,content}=cachedAssets[url.pathname];res.setHeader('Content-Type',type);res.end(content);return;
       }

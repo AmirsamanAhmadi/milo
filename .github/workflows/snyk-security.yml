@@ -65,6 +65,8 @@ jobs:
           if [ -f Dockerfile ]; then
             docker build --target runtime -t milo:security .
             snyk container test milo:security --file=Dockerfile
+            docker build --target database -t milo-database:security .
+            snyk container test milo-database:security --file=Dockerfile
           else
             echo 'No Dockerfile; container scan not applicable.' >> "$GITHUB_STEP_SUMMARY"
           fi

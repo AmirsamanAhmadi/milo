@@ -61,6 +61,13 @@ if(!base||!process.env.MILO_UI_FIXTURE)throw Error('Set MILO_UI_URL and MILO_UI_
   await page.locator('#notice').evaluate(element=>element.textContent='');
   await page.goto(base+'/#Role%20preferences');await page.locator('#pref-country').waitFor();await page.screenshot({path:output+'/role-preferences.png',fullPage:true});
   await page.goto(base+'/#Job%20toolkit/'+application.id);await page.locator('#toolkit-cv').waitFor();await page.screenshot({path:output+'/job-toolkit.png',fullPage:true});
+  await page.goto(base+'/#Writing/'+application.id);await page.locator('#letter-text').waitFor();
+  await page.locator('#letter-evidence').fill('Delivered Agile projects and improved reporting by 25%.');await page.locator('#letter-motivation').fill('Your customer delivery work matches my experience.');await page.locator('#letter-builder button[type=submit]').click();
+  await page.waitForFunction(()=>document.querySelector('#letter-text')?.value.includes('25%'));
+  assert.ok((await page.locator('[data-word-count="letter-text"]').textContent()).includes('words'));
+  await page.locator('.document-preview summary').click();assert.ok((await page.locator('[data-preview="letter-text"]').textContent()).includes('25%'));
+  await page.locator('#letter-form button[type=submit]').click();await page.getByText('Cover letter saved to this application.',{exact:true}).waitFor();
+  await page.screenshot({path:output+'/cover-letter-studio.png',fullPage:true});
   await page.goto(base+'/#AI%20settings');await page.locator('#ai-settings-form').waitFor();
   await page.locator('[data-provider-choice="My OpenAI key"]').click();assert.equal(await page.locator('#ai-provider').inputValue(),'My OpenAI key');assert.ok(await page.locator('#ai-key').isVisible());
   await page.screenshot({path:output+'/ai-settings.png',fullPage:true});
@@ -92,7 +99,7 @@ if(!base||!process.env.MILO_UI_FIXTURE)throw Error('Set MILO_UI_URL and MILO_UI_
   }
   await page.emulateMedia({reducedMotion:'reduce'});await page.evaluate(()=>document.querySelector('#toolkit-status').innerHTML='<span class="loading-orbit"></span>');assert.equal(await page.locator('#toolkit-status .loading-orbit').evaluate(element=>getComputedStyle(element).animationName),'none');await page.emulateMedia({reducedMotion:'no-preference'});
   await page.setViewportSize({width:390,height:844});
-  for(const route of ['CV%20studio','Role%20preferences','Job%20toolkit/'+application.id,'AI%20settings']){
+  for(const route of ['CV%20studio','Role%20preferences','Job%20toolkit/'+application.id,'Writing/'+application.id,'AI%20settings']){
    await page.goto(base+'/#'+route);await page.locator('h1').waitFor();
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'Mobile layout overflows: '+route);
   }

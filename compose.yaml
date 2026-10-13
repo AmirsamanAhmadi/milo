@@ -1,10 +1,28 @@
 name: milo
 services:
+  database:
+    build:
+      context: .
+      target: database
+    environment:
+      MILO_PRIVATE_DATA_DIR: /app-data
+    volumes:
+      - milo-data:/data
+      - milo-private-data:/app-data
+      - milo-db-socket:/run/milo-db
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
   milo:
     build:
       context: .
       target: runtime
     environment:
+      MILO_DB_SOCKET: /run/milo-db/database.sock
       MILO_PUBLIC_URL: "${MILO_PUBLIC_URL:-http://localhost:8080}"
       ADZUNA_APP_ID: "${ADZUNA_APP_ID:-}"
       ADZUNA_APP_KEY: "${ADZUNA_APP_KEY:-}"
@@ -21,7 +39,11 @@ services:
     ports:
       - "${MILO_BIND_ADDRESS:-127.0.0.1}:${MILO_PORT:-8080}:8080"
     volumes:
-      - milo-data:/data
+      - milo-private-data:/data
+      - milo-db-socket:/run/milo-db
+    depends_on:
+      database:
+        condition: service_healthy
     restart: unless-stopped
     init: true
     read_only: true
@@ -47,3 +69,5 @@ services:
       - no-new-privileges:true
 volumes:
   milo-data:
+  milo-db-socket:
+  milo-private-data:

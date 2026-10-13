@@ -60,20 +60,20 @@ Open http://localhost:8081 for the design preview, or http://localhost:8080 for 
 
 ## Storage and backups
 
-The initial release uses SQLite in `/data/milo.sqlite`. Documents are stored as private database BLOBs, with a 10 MB upload limit and 100 MB limit per user. Their downloads require a valid owning session. SQL statements bind all user values. Session and invitation tokens are stored as hashes; passwords use salted scrypt hashes.
+The `database` container owns SQLite in `/data/milo.sqlite`; the web container sends queries through a private Unix socket. There is no published database port. Transactions stay on one connection, roll back on disconnect, and have a ten-second safety lease. Documents are stored as private database BLOBs, with a 10 MB upload limit and 100 MB limit per user. Their downloads require a valid owning session. SQL statements bind all user values. Session and invitation tokens are stored as hashes; passwords use salted scrypt hashes.
 
 Create a consistent database backup, including uploaded files:
 
 ```sh
-docker compose exec milo python3 scripts/backup.py /data/milo-backup.sqlite
-docker compose cp milo:/data/milo-backup.sqlite ./milo-backup.sqlite
+docker compose exec database node scripts/backup.cjs /data/milo-backup.sqlite
+docker compose cp database:/data/milo-backup.sqlite ./milo-backup.sqlite
 ```
 
-Keep that copy outside the server and protect it as private data. Scheduled backup storage, operator restoration tooling and a tested disaster-recovery drill are not yet implemented. Do not copy a running SQLite database directly: its WAL can contain newer records. The supplied backup command uses SQLite's backup API.
+Keep that copy outside the server and protect it as private data. Back up the `milo-private-data` volume as well: it contains the encryption key and private AI account files needed to restore connections. The database-only backup does not contain this key. Scheduled backup storage, operator restoration tooling and a tested disaster-recovery drill are not yet implemented. Do not copy a running SQLite database directly: its WAL can contain newer records. The supplied backup command uses SQLite's backup API.
 
 ## Production direction
 
-This is a single-server foundation. Web/API and persistence are usable; there are no dummy worker/database containers. Add a real worker when background mail/search workloads exist. Reconsider PostgreSQL and private object/file storage when concurrency, task processing or document volume requires them. All new services, HTTPS ingress and backup jobs will remain containerized.
+This is a single-server foundation. Web/API and SQLite run in separate containers. The existing `milo-data` volume remains mounted only by the database service. The web container uses a new `milo-private-data` volume for provider-key material and private AI account files; the database service copies those legacy files once before becoming healthy, keeping the originals intact. The web container has no database-file mount. The socket has owner-only permissions and is mounted only into these two services. Add a real worker when background mail/search workloads exist. Reconsider PostgreSQL and private object/file storage when concurrency, task processing or document volume requires them. All new services, HTTPS ingress and backup jobs will remain containerized.
 
 Node 24 provides the built-in SQLite API, which is still experimental in that release. Pin reviewed runtime image digests for a release and regression-test runtime upgrades. No third-party Node packages are required by this foundation.
 
@@ -84,3 +84,15 @@ Node 24 provides the built-in SQLite API, which is still experimental in that re
 References: [Node 24 SQLite API](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html), [Docker multi-stage builds](https://docs.docker.com/build/building/multi-stage/), [Compose startup](https://docs.docker.com/reference/cli/docker/compose/up/).
 
 Optional direct TLS for Node execution requires explicit `MILO_TLS_KEY` and `MILO_TLS_CERT` paths. The legacy local certificate generators remain available, but default Docker startup does not use or mount certificates. Never commit private keys.
+
+## Upgrade to the separate database container
+
+Before upgrading an existing deployment, take a consistent backup using the old web container's backup command and copy it off the server. Preserve `/data/provider-key` and any private AI account files alongside the database backup: credentials need their existing encryption key. Stop the old application before starting the new database service, so two processes never own the database during migration:
+
+```sh
+docker compose stop milo
+docker compose up --build -d
+docker compose ps
+```
+
+Keep the same Compose project name and `milo-data` volume. No schema conversion or database export/import is needed. On first startup, credential files are copied into `milo-private-data` before the web service starts; existing private files are never overwritten. Conflicting encryption keys stop migration rather than silently making stored credentials unreadable. Never run `docker compose down -v` during an upgrade. Administrator setup commands still run in `milo` and connect to the database service automatically. Database backups now run in `database` using the command above. Run the web container with `MILO_DB_SOCKET=/run/milo-db/database.sock`; omitting it retains local SQLite for standalone development and disposable tests. The web service reconnects on the next request after a database restart. It never automatically retries an interrupted write; review the result before retrying. Its health endpoint reports database outages.

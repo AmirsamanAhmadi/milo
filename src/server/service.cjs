@@ -320,6 +320,6 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
       fail(404,'Endpoint not found.');
     } catch(error) {if(error instanceof Problem)return {status:error.status,body:{error:error.message}};throw error;}
   }
-  return {dispatch,bootstrap};
+  return {dispatch,bootstrap,health(){db.prepare('SELECT 1').get();}};
 }
 module.exports={createService,Problem};

@@ -8,8 +8,21 @@ COPY tests/ ./tests/
 COPY docs/code-scan-exceptions.json ./docs/code-scan-exceptions.json
 RUN node scripts/build-preview.cjs \
     && node tests/prototype.test.cjs \
-    && node --test tests/server.test.cjs \
+    && node --test tests/server.test.cjs tests/database.test.cjs \
     && python3 -m unittest discover -s tests -p 'test_*.py'
+
+# SQLite runs exclusively in this service; no database port is published.
+FROM node:24-alpine AS database
+WORKDIR /app
+ENV NODE_ENV=production MILO_DATA_DIR=/data
+RUN apk upgrade --no-cache && rm -rf /usr/local/lib/node_modules /opt/yarn* \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg \
+    && mkdir -p /data /app-data /run/milo-db && chown node:node /data /app-data /run/milo-db && chmod 700 /data /app-data /run/milo-db
+COPY --from=build /app/src/server/ ./src/server/
+COPY --from=build /app/scripts/backup.cjs ./scripts/
+USER node
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 CMD node -e "const db=require('./src/server/database-client.cjs').connectStore('/run/milo-db/database.sock');db.close()"
+CMD ["node", "src/server/database-main.cjs"]
 
 # Optional design preview. It never shares live accounts or database contents.
 FROM nginxinc/nginx-unprivileged:stable-alpine AS preview
