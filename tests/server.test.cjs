@@ -228,7 +228,7 @@ test('personal AI keys are encrypted and are never returned to members',async()=
  }finally{f.db.close();fs.rmSync(directory,{recursive:true,force:true});}
 });
 
-test('browser signup creates only the first administrator and signs them in',async()=>{
+test('public signup atomically creates one administrator and regular members',async()=>{
  const db=openStore(':memory:');try{
  const service=createService(db,{publicURL:origin});
  const call=(method,body={},requestOrigin=origin)=>service.dispatch({method,path:'/api/signup',body,requestOrigin});
@@ -237,14 +237,16 @@ test('browser signup creates only the first administrator and signs them in',asy
  assert.equal((await call('POST',credentials,'https://foreign.example')).status,403);
  assert.equal((await call('POST',{...credentials,password:randomBytes(4).toString('hex')})).status,400);
  const results=await Promise.all([call('POST',credentials),call('POST',{...credentials,email:'second@example.com'})]);
- assert.equal(results.filter(r=>r.status===201).length,1);
- assert.equal(results.filter(r=>r.status===409).length,1);
- const created=results.find(r=>r.status===201);assert.equal(created.body.user.role,'admin');
+ assert.equal(results.filter(r=>r.status===201).length,2);
+ assert.equal(results.filter(r=>r.body.user.role==='admin').length,1);
+ assert.equal(results.filter(r=>r.body.user.role==='member').length,1);
+ const created=results.find(r=>r.body.user.role==='admin');
  assert.match(created.cookie,/milo_session=/);
  assert.equal((await service.dispatch({path:'/api/me',cookie:created.cookie})).status,200);
- assert.equal((await call('GET')).body.available,false);
+ assert.equal((await call('GET')).body.available,true);
+ assert.equal((await call('GET')).body.firstAdministrator,false);
  assert.equal((await call('POST',credentials)).status,409);
- assert.equal(db.prepare('SELECT count(*) AS count FROM users').get().count,1);
+ assert.equal(db.prepare('SELECT count(*) AS count FROM users').get().count,2);
  }finally{db.close();}
 });
 
@@ -312,7 +314,7 @@ test('password verification attempts are throttled without changing credentials'
  }finally{f.db.close();}
 });
 
-test('invite-only accounts, admin permissions, single-use and expired invitations',async()=>{
+test('admin permissions and single-use or expired invitations',async()=>{
  const f=await fixture();try {
  assert.equal((await f.call('GET','/api/applications')).status,401);
  assert.equal((await f.call('POST','/api/register',{email:'public@example.com'},f.admin.cookie)).status,404);
@@ -483,4 +485,65 @@ test('document exports enforce template ownership and return reviewed draft byte
  const result=await f.call('POST','/api/exports',input,f.admin.cookie);assert.equal(result.status,200);assert.equal(captured.text,input.text);assert.equal(captured.template.kind,'txt');assert.equal(result.name,'tailored-cv.docx');assert.equal(Buffer.from(result.binary).toString(),'fixture-rendered-document');assert.equal(result.exportWarnings.length,1);
  assert.equal((await f.call('GET','/api/exports/templates',{},member.cookie)).body.templates.length,0);
  }finally{f.db.close();}
+});
+
+test('public registrations are members and admin resets revoke only the target sessions',async()=>{
+ const f=await fixture();try{
+  const secret=memberPassword(),replacement=memberPassword();
+  const registered=await f.call('POST','/api/signup',{email:'Public@Example.com',name:'Public User',password:secret,role:'admin'});
+  assert.equal(registered.status,201);assert.equal(registered.body.user.role,'member');
+  const id=registered.body.user.id,endpoint='/api/admin/members/'+id+'/password';
+  assert.equal((await f.call('POST','/api/signup',{email:'public@example.com',name:'Duplicate',password:secret})).status,409);
+  assert.equal((await f.call('GET','/api/admin/members',{},registered.cookie)).status,403);
+  assert.equal((await f.call('PUT',endpoint,{currentPassword:secret,newPassword:replacement},registered.cookie)).status,403);
+  assert.equal((await f.call('PUT',endpoint,{currentPassword:adminPassword,newPassword:replacement},f.admin.cookie,{requestOrigin:'https://foreign.example'})).status,403);
+  assert.equal((await f.call('PUT',endpoint,{currentPassword:'incorrect',newPassword:replacement},f.admin.cookie)).status,400);
+  assert.equal((await f.call('PUT',endpoint,{currentPassword:adminPassword,newPassword:'short'},f.admin.cookie)).status,400);
+  const second=await f.call('POST','/api/login',{email:'public@example.com',password:secret});
+  const reset=await f.call('PUT',endpoint,{currentPassword:adminPassword,newPassword:replacement},f.admin.cookie);
+  assert.equal(reset.status,200);assert.ok(!JSON.stringify(reset).includes(replacement));
+  for(const cookie of [registered.cookie,second.cookie])assert.equal((await f.call('GET','/api/me',{},cookie)).status,401);
+  assert.equal((await f.call('GET','/api/me',{},f.admin.cookie)).status,200);
+  assert.equal((await f.call('POST','/api/login',{email:'public@example.com',password:secret})).status,401);
+  assert.equal((await f.call('POST','/api/login',{email:'public@example.com',password:replacement})).status,200);
+  const directory=await f.call('GET','/api/admin/members',{},f.admin.cookie);
+  assert.equal(directory.body.members.length,2);assert.ok(!JSON.stringify(directory).includes('password_hash'));
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS count FROM password_reset_events WHERE target_id=?').get(id).count,1);
+ }finally{f.db.close();}
+});
+
+test('analytics are private, exclude saved-only jobs from response rates and score owner CV matches',async()=>{
+ const f=await fixture();try{
+  const member=await f.member('analytics@example.com');
+  const cv='Example person example@example.com Experience: Built Python services with SQL and reduced reporting time by 30 percent. Skills: Python SQL Docker. Education: Computing degree. Delivered reliable software for customer teams with documented results and clear communication across multiple successful projects.';
+  await f.call('PUT','/api/cv',{text:cv},f.admin.cookie);
+  const description='Build Python services with SQL and Docker for customer teams. Maintain reliable software, improve automated reporting and work with engineers to deliver documented production systems.';
+  await f.call('POST','/api/applications',{...app,description,stage:'Discovered',applied_at:''},f.admin.cookie);
+  const applied=await f.call('POST','/api/applications',{...app,description,applied_at:''},f.admin.cookie);
+  f.advance(86400000);await f.call('PUT','/api/applications/'+applied.body.application.id,{...app,description,applied_at:'',stage:'Interview'},f.admin.cookie);
+  await f.call('PUT','/api/applications/'+applied.body.application.id,{...app,description,applied_at:'',stage:'Withdrawn'},f.admin.cookie);
+  await f.call('POST','/api/applications',{...app,company:'Private Other Company',description},member.cookie);
+  const result=await f.call('GET','/api/analytics',{},f.admin.cookie);
+  assert.equal(result.status,200);assert.equal(result.body.counts.saved,2);assert.equal(result.body.counts.submitted,1);
+  assert.equal(result.body.responseRate,100);assert.equal(result.body.counts.interviews,1);
+  assert.equal(result.body.averageResponseDays,1);assert.equal(result.body.cv.scored,2);
+  assert.ok(result.body.cv.topJobs.every(job=>job.score===75&&job.missing.includes('Delivery')&&job.matched.includes('SQL')));assert.ok(!JSON.stringify(result.body).includes('Private Other Company'));
+  const other=await f.call('GET','/api/analytics',{},member.cookie);assert.equal(other.body.counts.saved,1);assert.equal(other.body.cv.scored,0);
+  await f.call('POST','/api/applications',{...app,company:'Historical Company',applied_at:'2020-01-01'},f.admin.cookie);
+  const recent=await f.call('GET','/api/analytics',{},f.admin.cookie,{query:{days:'30'}});assert.equal(recent.body.counts.saved,2);assert.ok(!JSON.stringify(recent.body).includes('Historical Company'));
+  assert.equal((await f.call('GET','/api/analytics')).status,401);
+  assert.equal((await f.call('GET','/api/analytics',{},f.admin.cookie,{query:{days:'7'}})).status,400);
+ }finally{f.db.close();}
+});
+
+
+test('analytics empty rates remain unknown and direct offers do not invent interview history',()=>{
+ const {buildAnalytics}=require('../src/server/analytics.cjs');
+ const empty=buildAnalytics([],[],[]);
+ assert.equal(empty.responseRate,null);assert.equal(empty.averageResponseDays,null);
+ const rows=[{id:'saved',role:'Engineer',company:'Example',stage:'Ready',applied_at:''},{id:'offer',role:'Engineer',company:'Example',stage:'Offer',applied_at:''}];
+ const result=buildAnalytics(rows,[],[]);
+ assert.equal(result.counts.saved,2);assert.equal(result.counts.submitted,1);assert.equal(result.responseRate,100);
+ assert.equal(result.counts.interviews,0);assert.equal(result.counts.offers,1);
+ assert.equal(result.responseTimingSample,0);assert.equal(result.companies[0].submitted,1);
 });

@@ -73,7 +73,8 @@ function openStore(filename, localOnly = false) {
     CREATE TABLE IF NOT EXISTS email_messages (user_id TEXT NOT NULL REFERENCES users(id),provider TEXT NOT NULL,message_id TEXT NOT NULL,subject TEXT NOT NULL,sender TEXT NOT NULL,received_at TEXT NOT NULL,snippet TEXT NOT NULL,application_id TEXT REFERENCES applications(id) ON DELETE SET NULL,imported_at TEXT NOT NULL,PRIMARY KEY(user_id,provider,message_id));
     CREATE TABLE IF NOT EXISTS email_clients (user_id TEXT NOT NULL REFERENCES users(id),provider TEXT NOT NULL,client_id TEXT NOT NULL,encrypted_secret TEXT NOT NULL,PRIMARY KEY(user_id,provider));
     CREATE TABLE IF NOT EXISTS cover_profiles (user_id TEXT PRIMARY KEY REFERENCES users(id),text TEXT NOT NULL,updated_at TEXT NOT NULL);
-    PRAGMA user_version=5;`);
+    CREATE TABLE IF NOT EXISTS password_reset_events (id TEXT PRIMARY KEY,actor_id TEXT NOT NULL REFERENCES users(id),target_id TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL);
+    PRAGMA user_version=6;`);
   return db;
 }
 module.exports = { openStore };

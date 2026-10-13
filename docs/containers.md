@@ -9,9 +9,9 @@ docker compose up --build -d
 docker compose exec milo node scripts/setup-admin.cjs
 ```
 
-The administrator setup command prompts for the first administrator's email, name and password. Password entry is hidden. Bootstrap stops working once any account exists; there is no public registration or default password.
+The administrator setup command prompts for the first administrator's email, name and password. Password entry is hidden. Bootstrap stops working once any account exists; public registration creates regular members after the first account; there is no default password.
 
-Open http://localhost:8080/#Signup to create the first administrator through the browser instead of the interactive command. Signup signs you in automatically and closes once an account exists. Existing users sign in at http://localhost:8080. Use **Invitations** to create a 72-hour, single-use link for a member. Copy the link when created; the secret is not stored in readable form or shown again. Deliver it yourself; invitation emails are not sent by Milo yet.
+Open http://localhost:8080/#Signup to create the first administrator through the browser instead of the interactive command. Signup signs you in automatically. The first account becomes administrator and all later public registrations become regular members. Existing users sign in at http://localhost:8080. Use **Invitations** to create a 72-hour, single-use link for a member. Copy the link when created; the secret is not stored in readable form or shown again. Deliver it yourself; invitation emails are not sent by Milo yet.
 
 The live app starts empty. Add your own applications, CV documents/text, preferences and cover letters. These are saved in the `milo-data` Docker volume. A normal `docker compose down` preserves the volume. Removing the volume deletes the data.
 

@@ -127,11 +127,16 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
       if(!['GET','POST','PUT','DELETE'].includes(method))fail(405,'Method not supported.');
       if(method!=='GET' && requestOrigin!==origin)fail(403,'Request origin was not accepted.');
       if(!body||typeof body!=='object'||Array.isArray(body))fail(400,'Use a JSON object.');
-      if(path==='/api/signup'&&method==='GET')return {status:200,body:{available:!statement('SELECT id FROM users LIMIT 1')}};
+      if(path==='/api/signup'&&method==='GET')return {status:200,body:{available:true,firstAdministrator:!statement('SELECT id FROM users LIMIT 1')}};
       if(path==='/api/signup'&&method==='POST') {
         throttle(ip);
-        const created=await bootstrap(body);
-        const u=statement('SELECT * FROM users WHERE id=?',created.id);
+        const address=email(body.email),name=text(body.name,'name',100,true),encoded=await hashPassword(body.password);
+        const u=transaction(()=>{
+          if(statement('SELECT id FROM users WHERE email=?',address))fail(409,'An account with this email already exists. Sign in.');
+          const role=statement('SELECT id FROM users LIMIT 1')?'member':'admin',id=randomUUID();
+          db.prepare('INSERT INTO users VALUES (?,?,?,?,?,?)').run(id,address,name,encoded,role,iso(now()));
+          return statement('SELECT * FROM users WHERE id=?',id);
+        });
         return {status:201,body:{user:publicUser(u)},cookie:startSession(u)};
       }
       if(path==='/api/login'&&method==='POST') {
@@ -264,11 +269,42 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         return {status:200,body:{ok:true},cookie:nextCookie};
       }
       if(path==='/api/me'&&method==='GET')return {status:200,body:{user:publicUser(user),stages,workplaces,types}};
+      if(path==='/api/analytics'&&method==='GET'){
+        throttle('analytics:'+user.id);
+        const days=Number(query.days||0);if(![0,30,90,180,365].includes(days))fail(400,'Choose a valid analytics period.');
+        const start=days?iso(now()-days*86400000).slice(0,10):'';
+        const rows=db.prepare("SELECT id,role,company,stage,applied_at,created_at FROM applications WHERE user_id=? AND (?='' OR coalesce(nullif(applied_at,''),substr(created_at,1,10))>=?)").all(user.id,start,start);
+        const events=db.prepare('SELECT application_id,stage,created_at FROM stage_events WHERE user_id=? ORDER BY created_at').all(user.id);
+        const jobs=db.prepare("SELECT id,role,company,description FROM applications WHERE user_id=? AND description<>'' AND (?='' OR coalesce(nullif(applied_at,''),substr(created_at,1,10))>=?) ORDER BY created_at DESC,rowid DESC LIMIT 100").all(user.id,start,start);
+        const cv=await cvText(user);let assessed=null,error=cv.error||'';
+        try{assessed=await processCV({cv:cv.text,jobs});}catch{error='CV matching is unavailable. Application statistics are still shown.';}
+        authenticate(cookie);
+        const result=require('./analytics.cjs').buildAnalytics(rows,events,jobs.map((job,i)=>({...job,fit:assessed?.fits[i]})),{now:now(),days,cvAvailable:Boolean(assessed?.cv?.available),roles:assessed?.recommendations||[],skills:assessed?.skills||[]});
+        return {status:200,body:{...result,cv:{...result.cv,source:cv.source,error}}};
+      }
       if(path==='/api/me'&&method==='PUT') {db.prepare('UPDATE users SET name=? WHERE id=?').run(text(body.name,'name',100,true),user.id);return {status:200,body:{user:publicUser(statement('SELECT * FROM users WHERE id=?',user.id))}};}
       if(path==='/api/logout'&&method==='POST') {const token=cookie.split(';').map(x=>x.trim()).find(x=>x.startsWith('milo_session='))?.slice(13);db.prepare('DELETE FROM sessions WHERE token_hash=?').run(digest(token));return {status:200,body:{ok:true},cookie:`milo_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${secure?'; Secure':''}`};}
       if(path.startsWith('/api/admin/')) {
         if(user.role!=='admin')fail(403,'Administrator access is required.');
         if(path==='/api/admin/members'&&method==='GET')return {status:200,body:{members:db.prepare('SELECT id,name,email,role,created_at FROM users ORDER BY created_at').all()}};
+        const reset=path.match(/^\/api\/admin\/members\/([a-f0-9-]+)\/password$/);
+        if(reset&&method==='PUT'){
+          throttle('admin-reset:'+user.id);
+          if(reset[1]===user.id)fail(400,'Change your own password in My account.');
+          if(!await verifyPassword(body.currentPassword,user.password_hash))fail(400,'Your administrator password is incorrect.');
+          const target=statement('SELECT * FROM users WHERE id=?',reset[1]);
+          if(!target)fail(404,'User not found.');
+          const encoded=await hashPassword(body.newPassword);
+          transaction(()=>{
+            const actor=authenticate(cookie);
+            if(actor.role!=='admin'||actor.password_hash!==user.password_hash)fail(403,'Sign in again before resetting a password.');
+            const changed=db.prepare('UPDATE users SET password_hash=? WHERE id=? AND password_hash=?').run(encoded,target.id,target.password_hash);
+            if(!changed.changes)fail(409,'The user password changed. Refresh and try again.');
+            db.prepare('DELETE FROM sessions WHERE user_id=?').run(target.id);
+            db.prepare('INSERT INTO password_reset_events VALUES (?,?,?,?)').run(randomUUID(),user.id,target.id,iso(now()));
+          });
+          return {status:200,body:{ok:true}};
+        }
         if(path==='/api/admin/invitations'&&method==='GET')return {status:200,body:{invitations:db.prepare('SELECT id,email,expires_at,accepted_at,revoked_at,created_at FROM invitations ORDER BY created_at DESC').all()}};
         if(path==='/api/admin/invitations'&&method==='POST') {
           const address=email(body.email);if(statement('SELECT id FROM users WHERE email=?',address))fail(409,'This user is already a member.');

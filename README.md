@@ -1,6 +1,6 @@
 # Milo
 
-Milo is an invite-only, self-hosted career workspace. It keeps application records, private CVs, role preferences and custom cover letters together, with a responsive light/dark interface.
+Milo is an self-hosted, self-hosted career workspace. It keeps application records, private CVs, role preferences and custom cover letters together, with a responsive light/dark interface.
 
 ## Run the live app
 
@@ -10,7 +10,7 @@ Requires Docker and Docker Compose. The container includes Node.js 24 and Python
 docker compose up --build -d
 ```
 
-Open http://localhost:8080/#Signup to create your first administrator in the browser; signup signs you in automatically. `docker compose exec milo node scripts/setup-admin.cjs` is the interactive alternative. Signup closes as soon as any account exists. There are no default credentials. Administrators create member invitation links through **Invitations**; links expire after 72 hours and can be accepted only once.
+Open http://localhost:8080/#Signup to create your first administrator in the browser; signup signs you in automatically. `docker compose exec milo node scripts/setup-admin.cjs` is the interactive alternative. The first account becomes administrator; subsequent self-registrations become regular members. No invitation is required. There are no default credentials. Administrators create member invitation links through **Invitations**; links expire after 72 hours and can be accepted only once.
 
 The web application and SQLite database run in separate containers, connected by a private socket. Records survive container restarts in the existing `milo-data` named volume. See [Container setup](docs/containers.md) for server origins, ports, backups and the optional preview.
 
@@ -30,8 +30,8 @@ Register Gmail/Outlook redirect URLs using your external HTTPS origin, for examp
 
 ## Implemented live features
 
-- Real invite-only accounts, password hashing, database-backed sessions and logout.
-- Administrator-only member listing and invitation creation/revocation.
+- Real self-hosted accounts, password hashing, database-backed sessions and logout.
+- Public member registration, administrator-only user listing and password resets, plus optional invitations.
 - Private application records: role, company, location, work arrangement, employment type, annual salary in the currency of the selected country, source URL, description, notes, dates and stage history.
 - Application search/stage filters and a dashboard with pipeline/offer/follow-up counts.
 - Worldwide preferences with 250 countries/territories, default currencies, city/state suggestions and visa sponsorship filters. Live jobs sort by highest CV keyword match and can be saved in one click.
@@ -96,3 +96,5 @@ This optional command requires host Python 3.10+ and a running Compose network. 
 See [the interface review](docs/ui-review.md) for worldwide location/currency suggestions, sponsorship filtering, CV recommendations, job saving, interview materials and browser verification. Gmail and Outlook connections require the [email OAuth setup](docs/email-sync.md).
 
 The Job toolkit provides a three-step workflow for the job brief, assessment and draft review. Cover letters have a dedicated writing workspace with word counts and text previews. DOCX exports align draft sections with original template sections, keeping tables, paragraph styles and mixed run formatting. PDF-source layouts remain approximate; use the original DOCX for editable template preservation.
+
+Open **Find jobs → Analytics** for private application counts, response/interview/offer rates, recorded response timing, stage charts, CV keyword matches by role/company, and company response samples. Add full job descriptions and keep stages and application dates current for useful results. **Administration → Members** lists every registered account and allows password resets after confirming the administrator password; a reset revokes all sessions for the target user. Share the new password privately. Registration does not verify email ownership, and resets do not send mail.
