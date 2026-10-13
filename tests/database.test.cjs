@@ -46,5 +46,12 @@ test('separate database persists BLOBs, rolls back disconnected transactions and
     await stop();await start();
     assert.equal(db.prepare('SELECT label FROM transport_test WHERE id=?').get(1).label,'Résumé');
     assert.equal(db.prepare('SELECT COUNT(*) AS total FROM transport_test').get().total,1);
+    db.exec('BEGIN IMMEDIATE');db.prepare('INSERT INTO transport_test VALUES (?,?,?)').run(3,bytes,'Interrupted');
+    const previous=db,exited=once(child,'exit');child.kill('SIGTERM');await exited;
+    await start();
+    assert.throws(()=>previous.prepare('INSERT INTO transport_test VALUES (?,?,?)').run(4,bytes,'Must not autocommit'),/interrupted|unavailable/);
+    previous.exec('ROLLBACK');
+    assert.equal(previous.prepare('SELECT COUNT(*) AS total FROM transport_test').get().total,1);
+    previous.close();
   }finally{if(child?.exitCode===null)await stop();fs.rmSync(directory,{recursive:true,force:true});}
 });

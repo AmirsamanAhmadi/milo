@@ -79,7 +79,7 @@ Node 24 provides the built-in SQLite API, which is still experimental in that re
 
 ## Validation
 
-`docker compose config --quiet`, `npm test` and `python -m unittest discover -s tests -p 'test_*.py'` validate configuration and application behavior. Tests use real temporary SQLite databases and exercise the HTTP handler and browser script against the service; they do not replace real-browser tests. On 12 October 2026, the Docker image built successfully with all 15 service tests, prototype checks and 8 Python tests passing. The live container became healthy and its HTTPS health endpoint and login page returned HTTP 200. Full interactive browser QA remains outstanding.
+`docker compose config --quiet`, `npm test` and `python -m unittest discover -s tests -p 'test_*.py'` validate configuration and application behavior. Tests use real temporary SQLite databases and exercise the HTTP handler and browser script against the service; they do not replace real-browser tests. `python scripts/check-live-ui.py` builds disposable web and database containers and exercises the writing and account flows in Chromium, including mobile layouts, loading indicators and DOCX/PDF downloads. It uses fictional accounts and leaves production data untouched. CI runs these checks and uploads interface screenshots.
 
 References: [Node 24 SQLite API](https://nodejs.org/download/release/latest-v24.x/docs/api/sqlite.html), [Docker multi-stage builds](https://docs.docker.com/build/building/multi-stage/), [Compose startup](https://docs.docker.com/reference/cli/docker/compose/up/).
 
