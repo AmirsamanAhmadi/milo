@@ -227,11 +227,11 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         db.prepare('INSERT INTO job_toolkits VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(user_id,job_key) DO UPDATE SET job=excluded.job,assessment=excluded.assessment,tailored_cv=excluded.tailored_cv,cover_letter=excluded.cover_letter,cv_hash=excluded.cv_hash,updated_at=excluded.updated_at').run(user.id,key,JSON.stringify(job),drafts.assessment?JSON.stringify(drafts.assessment):null,drafts.tailoredCV,drafts.coverLetter,drafts.cvHash,iso(now()));
         return {status:200,body:{job,...drafts,ai:aiConfiguration(user)}};
       }
-      if(path==='/api/jobs/providers'&&method==='GET')return {status:200,body:{providers:[...['All available','Indeed','LinkedIn','Glassdoor','Working Nomads','Arbeitnow'].map(name=>({name,available:true})),{name:'Adzuna NZ',available:adzunaConfigured},{name:'SEEK',available:seekConfigured}]}};
+      if(path==='/api/jobs/providers'&&method==='GET')return {status:200,body:{providers:[...['All available','Indeed','LinkedIn','Glassdoor','Working Nomads','Arbeitnow'].map(name=>({name,available:true})),{name:'Company websites only',available:true,discoveryConfigured:Boolean(process.env.SERPER_API_KEY)},{name:'Adzuna NZ',available:adzunaConfigured},{name:'SEEK',available:seekConfigured}]}};
       if(path==='/api/jobs/search'&&method==='POST') {
         throttle('jobs:'+user.id);
         const provider=body.provider;
-        if(!['All available','Indeed','LinkedIn','Glassdoor','Working Nomads','Arbeitnow','Adzuna NZ','SEEK'].includes(provider))fail(400,'Choose a valid job source.');
+        if(!['All available','Indeed','LinkedIn','Glassdoor','Working Nomads','Arbeitnow','Adzuna NZ','SEEK','Company websites only'].includes(provider))fail(400,'Choose a valid job source.');
         if(provider==='SEEK'&&!seekConfigured)fail(503,'SEEK requires an administrator Apify token.');
         if(provider==='Adzuna NZ'&&!adzunaConfigured)fail(503,'New Zealand search requires Adzuna credentials. Ask your administrator to configure them.');
         const query=text(body.query??'','search keywords',200),location=text(body.location??'','search location',200),page=body.page??1;
@@ -240,8 +240,19 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
         if(provider==='SEEK'&&(!['new zealand','australia'].includes(country)||page!==1||body.remote))fail(400,'SEEK supports Australia/New Zealand, one page and no remote-only filter.');
         if(['All available','Indeed','LinkedIn','Glassdoor'].includes(provider)&&!query)fail(400,'Enter search keywords for job-board searches.');
         if(!Number.isInteger(page)||page<1||page>10||typeof body.remote!=='boolean')fail(400,'Choose valid search filters.');
+        let companyOptions={};
+        if(provider==='Company websites only'){
+          const companyUrls=body.companyUrls||[];
+          if(!Array.isArray(companyUrls)||companyUrls.length>6||companyUrls.some(url=>typeof url!=='string'||url.length>2000))fail(400,'Enter up to six company career URLs.');
+          for(const value of companyUrls){try{const u=new URL(value);if(u.protocol!=='https:'||u.username||u.password||u.port&&u.port!=='443')throw Error();}catch{fail(400,'Use public HTTPS company career URLs.');}}
+          if(body.includePortals!==undefined&&typeof body.includePortals!=='boolean')fail(400,'Choose whether to include linked employer career portals.');
+          if(companyUrls.length&&page!==1)fail(400,'Company URL searches use one page.');
+          if(!companyUrls.length&&!process.env.SERPER_API_KEY)fail(503,'Google discovery needs an administrator search API connection. Enter company career URLs to search without it.');
+          if(!companyUrls.length&&!query)fail(400,'Enter a target role for Google company discovery.');
+          companyOptions={companyUrls,includePortals:body.includePortals??true,countryCode:countryFor(country).code,countryName:countryFor(country).name};
+        }
         let result;
-        try{result=await jobSearch({provider,query,location,page,remote:body.remote,country});}
+        try{result=await jobSearch({provider,query,location,page,remote:body.remote,country,...companyOptions});}
         catch{fail(502,'The job provider is unavailable. Try again later.');}
         const cv=await cvText(user);
         let assessment;

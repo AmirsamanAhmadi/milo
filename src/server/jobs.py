@@ -35,6 +35,9 @@ def normalize(row, provider):
 
 def fetch_jobs(settings):
     provider = settings["provider"]
+    if provider == "Company websites only":
+        from company_jobs import fetch_company_jobs
+        return fetch_company_jobs(settings)
     if provider in ("Indeed", "LinkedIn", "Glassdoor"):
         return fetch_jobspy(settings)
     if provider == "Working Nomads":

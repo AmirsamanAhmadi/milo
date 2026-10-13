@@ -34,7 +34,7 @@ function createJobSearch({fetchJobs=pythonFetch,now=()=>Date.now()}={}) {
     }
     const terms=settings.query.toLowerCase().split(',').map(t=>t.trim()).filter(Boolean);
     const jobs=result.jobs.filter(j=>(!terms.length||terms.some(t=>(j.role+' '+j.company+' '+j.description).toLowerCase().includes(t)))&&(!settings.location||j.location.toLowerCase().includes(settings.location.toLowerCase()))&&(!settings.remote||j.remote===true));
-    return {jobs,hasMore:result.hasMore,warning:result.warning,fetchedAt:result.fetchedAt,provider:settings.provider,page:settings.page};
+    return {jobs,hasMore:result.hasMore,warning:result.warning,fetchedAt:result.fetchedAt,provider:settings.provider,page:settings.page,...(result.discovery?{discovery:result.discovery,checkedSites:result.checkedSites}:{})};
   };
 }
 function pythonFetch(settings) {
