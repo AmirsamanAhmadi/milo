@@ -38,6 +38,10 @@ test('separate database persists BLOBs, rolls back disconnected transactions and
     const bytes=Buffer.from([0,255,1,0,128]);
     db.exec('BEGIN IMMEDIATE');db.prepare('INSERT INTO transport_test VALUES (?,?,?)').run(1,bytes,'Résumé');db.exec('COMMIT');
     assert.deepEqual(db.prepare('SELECT bytes FROM transport_test WHERE id=?').get(1).bytes,bytes);
+    const longLabel='Résumé · 東京 · 🚀 '.repeat(12000);
+    db.prepare('UPDATE transport_test SET label=? WHERE id=?').run(longLabel,1);
+    assert.equal(db.prepare('SELECT label FROM transport_test WHERE id=?').get(1).label,longLabel);
+    db.prepare('UPDATE transport_test SET label=? WHERE id=?').run('Résumé',1);
     assert.equal(db.prepare('SELECT id FROM transport_test WHERE id=?').get(99),undefined);
     assert.throws(()=>db.prepare('INSERT INTO transport_test VALUES (?,?,?)').run(1,bytes,'Duplicate'),/UNIQUE/);
     db.exec('BEGIN IMMEDIATE');db.prepare('INSERT INTO transport_test VALUES (?,?,?)').run(2,bytes,'Rollback');db.close();

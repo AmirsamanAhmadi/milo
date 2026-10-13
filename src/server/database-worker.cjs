@@ -11,6 +11,7 @@ function reply(result) {
   inProgress=false;
 }
 const socket=net.createConnection(workerData.socket);
+socket.setEncoding('utf8');
 socket.on('connect',()=>{ready=true;for(const message of queue) socket.write(message);queue=[];});
 socket.on('data',chunk=>{pending+=chunk.toString();let end;while((end=pending.indexOf('\n'))>=0){reply(JSON.parse(pending.slice(0,end)));pending=pending.slice(end+1);}});
 function disconnect(){ready=false;failed=true;Atomics.store(state,2,1);if(inProgress)reply({error:'Database connection unavailable; retry after it restarts.'});}

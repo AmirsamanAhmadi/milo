@@ -11,7 +11,12 @@ function migratePrivateFiles(source,destination){
       if(name==='provider-key'&&!fs.readFileSync(original).equals(fs.readFileSync(target)))throw Error('Credential keys differ; resolve the private-data migration before starting Milo.');
       continue;
     }
-    fs.cpSync(original,target,{recursive:true,errorOnExist:true,force:false});
+    const staging=fs.mkdtempSync(path.join(destination,'.migration-'));
+    try{
+      const copied=path.join(staging,'value');
+      fs.cpSync(original,copied,{recursive:true,errorOnExist:true,force:false});
+      fs.renameSync(copied,target);
+    }finally{fs.rmSync(staging,{recursive:true,force:true});}
   }
   fs.writeFileSync(marker,'Private files copied; original files retained.\n',{flag:'wx',mode:0o600});
 }
