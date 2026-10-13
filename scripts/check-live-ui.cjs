@@ -98,9 +98,12 @@ if(!base||!process.env.MILO_UI_FIXTURE)throw Error('Set MILO_UI_URL and MILO_UI_
    const completed=page.waitForEvent('download');await page.locator(`[data-export-kind="cv"][data-export-format="${format}"]`).click();const download=await completed;assert.ok(download.suggestedFilename().endsWith('.'+format));const path=await download.path(),bytes=fs.readFileSync(path);assert.ok(bytes.subarray(0,4).equals(Buffer.from(format==='pdf'?'%PDF':'PK\x03\x04')));
   }
   await page.emulateMedia({reducedMotion:'reduce'});await page.evaluate(()=>document.querySelector('#toolkit-status').innerHTML='<span class="loading-orbit"></span>');assert.equal(await page.locator('#toolkit-status .loading-orbit').evaluate(element=>getComputedStyle(element).animationName),'none');await page.emulateMedia({reducedMotion:'no-preference'});
+  await page.evaluate(async id=>{const current=(await fetch('/api/applications/'+id).then(r=>r.json())).application;const body={...current,stage:'Applied',applied_at:new Date(Date.now()-7*86400000).toISOString().slice(0,10)};for(const stage of ['Applied','Interview']){const result=await fetch('/api/applications/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,stage})});if(!result.ok)throw Error('Unable to create analytics review history');}},application.id);
   await page.goto(base+'/#Analytics');await page.getByRole('heading',{name:'Your application insights.'}).waitFor();
   assert.ok(await page.locator('svg[role="img"]').count()>=2);assert.ok(await page.getByRole('heading',{name:'Company response history',exact:true}).isVisible());
   await page.locator('#analytics-period').selectOption('30');await page.locator('#analytics-period').waitFor();await page.waitForTimeout(700);
+  const analytics=await page.evaluate(()=>fetch('/api/analytics?days=30').then(r=>r.json()));assert.equal(analytics.counts.submitted,1);assert.equal(analytics.responseRate,100);assert.equal(analytics.counts.interviews,1);assert.ok(analytics.timeline.some(month=>month.submitted===1&&month.responses===1));
+  await page.locator('#notice').evaluate(element=>element.textContent='');
   await page.screenshot({path:output+'/analytics.png',fullPage:true});
   const publicContext=await browser.newContext({viewport:{width:1000,height:900}}),publicPage=await publicContext.newPage();
   const publicSecret=randomBytes(24).toString('hex'),resetSecret=randomBytes(24).toString('hex');
@@ -111,7 +114,7 @@ if(!base||!process.env.MILO_UI_FIXTURE)throw Error('Set MILO_UI_URL and MILO_UI_
   await resetForm.locator('[name=currentPassword]').fill(secret);await resetForm.locator('[name=newPassword]').fill(resetSecret);await resetForm.locator('[name=confirmPassword]').fill(resetSecret);await resetForm.locator('button[type=submit]').click();await page.getByText('Password reset. The user’s sessions have been signed out.',{exact:true}).waitFor();
   assert.equal(await publicPage.evaluate(()=>fetch('/api/me').then(r=>r.status)),401);
   await publicPage.goto(base+'/#Login');await publicPage.locator('#auth-email').fill('public-review@example.com');await publicPage.locator('#auth-password').fill(resetSecret);await publicPage.locator('#auth-form button').click();await publicPage.getByRole('heading',{name:'Welcome, Public.'}).waitFor();
-  await page.screenshot({path:output+'/registered-users.png',fullPage:true});await publicContext.close();
+  await page.locator('#member-search').fill('');await page.screenshot({path:output+'/registered-users.png',fullPage:true});await publicContext.close();
   await page.setViewportSize({width:390,height:844});
   for(const route of ['CV%20studio','Role%20preferences','Job%20toolkit/'+application.id,'Writing/'+application.id,'Analytics','Members','AI%20settings']){
    await page.goto(base+'/#'+route);await page.locator('h1').waitFor();
