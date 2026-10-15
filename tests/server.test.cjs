@@ -15,6 +15,77 @@ const {openStore}=require('../src/server/store.cjs');
 const {createService}=require('../src/server/service.cjs');
 const {handler}=require('../src/server/http.cjs');
 const origin='http://localhost:8080';
+test('ChatGPT model discovery initializes the member CLI, follows pages and hides hidden models',async()=>{
+ const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream');
+ const {discoverModels}=require('../src/server/codex-account.cjs');
+ let child,killed=false;const messages=[];
+ const models=await discoverModels('/private/member',(command,args,options)=>{
+  assert.equal(command,'codex');assert.ok(args.includes('app-server'));
+  assert.deepEqual(Object.keys(options.env).sort(),['CODEX_HOME','HOME','PATH']);assert.equal(options.env.CODEX_HOME,'/private/member');assert.equal(options.cwd,'/private/member');
+  child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>{killed=true;};
+  child.stdin=new Writable({write(chunk,encoding,done){
+   const request=JSON.parse(chunk);messages.push(request);
+   let result;
+   if(request.method==='initialize')result={};
+   if(request.method==='model/list')result=request.params.cursor?{data:[{model:'second',displayName:'Second'}],nextCursor:null}:{data:[{model:'first',displayName:'First'},{model:'hidden',hidden:true}],nextCursor:'page-two'};
+   if(result)queueMicrotask(()=>{const line=JSON.stringify({id:request.id,result})+'\n';child.stdout.write(line.slice(0,8));child.stdout.write(line.slice(8));});done();
+  }});return child;
+ });
+ assert.deepEqual(models,[{model:'first',displayName:'First'},{model:'second',displayName:'Second'}]);
+ assert.equal(messages[1].method,'initialized');assert.equal(messages[2].params.includeHidden,false);assert.equal(messages[3].params.cursor,'page-two');assert.ok(killed);
+});
+test('ChatGPT model discovery cleans up on protocol failure, exit and timeout without leaking details',async()=>{
+ const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream');
+ const {discoverModels}=require('../src/server/codex-account.cjs');
+ for(const mode of ['error','exit','timeout']){
+  let killed=false;
+  await assert.rejects(discoverModels('/private/member',()=>{
+   const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.kill=()=>{killed=true;};
+   if(mode==='error')queueMicrotask(()=>child.stdout.write(JSON.stringify({id:1,error:{message:'private diagnostic'}})+'\n'));
+   if(mode==='exit')queueMicrotask(()=>child.emit('close',1));
+   return child;
+  },20),error=>error.message.includes('Could not load ChatGPT models')&&!error.message.includes('private diagnostic'));
+  assert.ok(killed);
+ }
+});
+test('model suggestions require sign-in, use the authenticated member and preserve editable model values',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'milo-models-')),previous=process.env.MILO_DATA_DIR;
+ process.env.MILO_DATA_DIR=dir;const owners=[];let unavailable=false;
+ const f=await fixture(':memory:',{aiModelLister:async id=>{owners.push(id);if(unavailable)throw Error('private provider error');return [{model:'suggested',displayName:'Suggested'}];}});
+ try{
+  const owner=f.admin.body.user.id;
+  assert.equal((await f.call('GET','/api/ai/models')).status,401);
+  assert.equal((await f.call('GET','/api/ai/models',{},f.admin.cookie)).status,409);assert.equal(owners.length,0);
+  const home=require('../src/server/codex-account.cjs').accountHome(owner);fs.mkdirSync(home,{recursive:true});fs.writeFileSync(path.join(home,'auth.json'),'{}');
+  const response=await f.call('GET','/api/ai/models',{},f.admin.cookie);
+  assert.equal(response.status,200);assert.deepEqual(response.body.models,[{model:'suggested',displayName:'Suggested'}]);assert.deepEqual(owners,[owner]);
+  const member=await f.member('models-member@example.com');assert.equal((await f.call('GET','/api/ai/models',{},member.cookie)).status,409);
+  const saved=await f.call('PUT','/api/ai/settings',{provider:'ChatGPT',model:'manually-edited'},f.admin.cookie);assert.equal(saved.body.model,'manually-edited');
+  unavailable=true;const failed=await f.call('GET','/api/ai/models',{},f.admin.cookie);assert.equal(failed.status,502);assert.ok(!JSON.stringify(failed.body).includes('private provider error'));
+  await f.call('POST','/api/ai/logout',{},f.admin.cookie);assert.equal((await f.call('GET','/api/ai/models',{},f.admin.cookie)).status,409);
+ }finally{f.db.close();if(previous===undefined)delete process.env.MILO_DATA_DIR;else process.env.MILO_DATA_DIR=previous;fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('editable ChatGPT suggestions preserve typed values and ignore outdated provider responses',async()=>{
+ const vm=require('node:vm'),elements=new Map();
+ const element=id=>{if(!elements.has(id))elements.set(id,{innerHTML:'',value:'',textContent:'',dataset:{},listeners:{},addEventListener(event,fn){this.listeners[event]=fn;}});return elements.get(id);};
+ let fetchModels=async()=>({models:[{model:'suggested-model',displayName:'Suggested <model>'}]});let requests=0;
+ const context=vm.createContext({document:{querySelector:element,querySelectorAll:()=>[],addEventListener(){}},window:{addEventListener(){}},setTimeout,clearTimeout,fetch:async url=>{assert.equal(url,'/api/ai/models');requests++;return {ok:true,json:()=>fetchModels()};}});
+ const source=fs.readFileSync('src/live/app.js','utf8');vm.runInContext(source.slice(0,source.lastIndexOf('(async()=>{applyTheme();')),context);
+ const run=code=>vm.runInContext(code,context);
+ run("current='AI settings';user={id:'member'}");
+ const markup=run("aiSettingsPage({provider:'ChatGPT',model:'saved-model',codex:{connected:true}})");
+ assert.ok(markup.includes('list="ai-model-options"'));assert.ok(markup.includes('value="saved-model"'));
+ element('#ai-provider').value='ChatGPT';element('#ai-model').value='typed-model';
+ await run('loadAIModels()');assert.equal(requests,0);assert.match(element('#ai-model-help').textContent,/Sign in/);
+ element('#ai-settings-form').dataset.chatgptConnected='true';
+ await run('loadAIModels()');assert.equal(requests,1);assert.ok(element('#ai-model-options').innerHTML.includes('value="suggested-model"'));assert.ok(element('#ai-model-options').innerHTML.includes('Suggested &lt;model&gt;'));assert.equal(element('#ai-model').value,'typed-model');
+ let complete;fetchModels=()=>new Promise(resolve=>{complete=resolve;});const pending=run('loadAIModels()');await new Promise(resolve=>setImmediate(resolve));
+ element('#ai-provider').value='Local AI';await run('loadAIModels()');complete({models:[{model:'stale-model',displayName:'Stale'}]});await pending;
+ assert.equal(element('#ai-model-options').innerHTML,'');assert.equal(element('#ai-model').value,'typed-model');assert.equal(element('[data-ai-models-refresh]').hidden,true);
+ element('#ai-provider').value='ChatGPT';fetchModels=async()=>{throw Error('Lookup failed. Enter a model manually.');};await run('loadAIModels()');
+ assert.match(element('#ai-model-help').textContent,/Lookup failed/);assert.equal(element('[data-ai-models-refresh]').disabled,false);assert.equal(element('#ai-model').value,'typed-model');
+ fetchModels=async()=>({models:[]});await run('loadAIModels()');assert.match(element('#ai-model-help').textContent,/No model suggestions/);
+});
 test('HTTP upstream supports an HTTPS public origin without trusting forwarded headers',async()=>{
  const f=await fixture(),http=require('node:http'),publicURL='https://milo.example.com';
  const server=http.createServer(handler(createService(f.db,{publicURL})));
