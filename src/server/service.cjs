@@ -63,7 +63,7 @@ function applicationInput(data) {
   if(salary!==null && (!Number.isSafeInteger(salary)||salary<0||salary>1000000000000)) fail(400,'Enter a valid annual salary.');
   return { role:text(data.role,'role',200,true),company:text(data.company,'company',200,true),location:text(data.location??'','location'),workplace:data.workplace,employment_type:data.employment_type,source:text(data.source??'','source'),url:httpURL(data.url),salary,stage:data.stage,applied_at:date(data.applied_at,'application date'),follow_up:date(data.follow_up,'follow-up date'),description:text(data.description??'','job description',30000),notes:text(data.notes??'','notes',10000),country,currency };
 }
-function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now(), jobSearch=createJobSearch(), adzunaConfigured=Boolean(process.env.ADZUNA_APP_ID&&process.env.ADZUNA_APP_KEY), seekConfigured=Boolean(process.env.APIFY_TOKEN), aiGenerator=generateAI, aiConfigured=Boolean(process.env.OPENAI_API_KEY&&process.env.OPENAI_MODEL), aiModel=process.env.OPENAI_MODEL||'', credentialVault=null, documentExporter=exportDocument }={}) {
+function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now(), jobSearch=createJobSearch(), adzunaConfigured=Boolean(process.env.ADZUNA_APP_ID&&process.env.ADZUNA_APP_KEY), seekConfigured=Boolean(process.env.APIFY_TOKEN), aiGenerator=generateAI, aiConfigured=Boolean(process.env.OPENAI_API_KEY&&process.env.OPENAI_MODEL), aiModel=process.env.OPENAI_MODEL||'', credentialVault=null, documentExporter=exportDocument, aiModelLister=codexAccount.listModels }={}) {
   let aiActive=0,exportActive=0;
   const vault=credentialVault||createVault();
   function searchKey(){const row=db.prepare('SELECT encrypted_key FROM workspace_search WHERE id=1').get();return row?vault.decrypt(row.encrypted_key):process.env.SERPER_API_KEY||'';}
@@ -180,6 +180,14 @@ function createService(db, { publicURL='http://localhost:8080', now=()=>Date.now
       if(path==='/api/email/sync'&&method==='POST'){throttle('mail:'+user.id);try{return {status:200,body:await mail.sync(user,body.provider)};}catch(e){fail(502,e.message);}}
       if(path==='/api/email/disconnect'&&method==='POST'){try{mail.disconnect(user,body.provider);return {status:200,body:{ok:true}};}catch(e){fail(400,e.message);}}
       if(path==='/api/ai/status'&&method==='GET')return {status:200,body:aiConfiguration(user)};
+      if(path==='/api/ai/models'&&method==='GET'){
+        if(!codexAccount.status(user.id).connected)fail(409,'Sign in to ChatGPT to load model suggestions.');
+        throttle('ai-models:'+user.id);
+        let models;try{models=await aiModelLister(user.id);}catch{fail(502,'Could not load ChatGPT models. Try again or sign in again. You can still enter a model manually.');}
+        authenticate(cookie);
+        if(!codexAccount.status(user.id).connected)fail(409,'Sign in to ChatGPT to load model suggestions.');
+        return {status:200,body:{models}};
+      }
       if(path==='/api/ai/settings'&&method==='PUT'){
         if(!['OpenAI','My OpenAI key','Local AI','ChatGPT'].includes(body.provider))fail(400,'Choose a supported AI provider.');
         const model=text(body.model??'','model',100),secret=text(body.apiKey??'','API key',1000);
