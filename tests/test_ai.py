@@ -53,8 +53,9 @@ class AITests(unittest.TestCase):
             self.assertIn('shell_tool', command)
             self.assertNotIn('OPENAI_API_KEY', kwargs['env'])
             self.assertEqual(kwargs['env']['CODEX_HOME'], '/private/member')
+            self.assertEqual(command[command.index('--model') + 1], 'member-selected-model')
             Path(command[command.index('--output-last-message') + 1]).write_text(json.dumps(RESULT))
-        with patch.dict(os.environ, {'MILO_AI_PROVIDER': 'ChatGPT', 'MILO_CODEX_HOME': '/private/member'}), patch.object(ai.subprocess, 'run', run):
+        with patch.dict(os.environ, {'MILO_AI_PROVIDER': 'ChatGPT', 'MILO_CODEX_HOME': '/private/member', 'MILO_AI_MODEL': 'member-selected-model'}), patch.object(ai.subprocess, 'run', run):
             self.assertEqual(ai.generate({'action': 'assess'})['score'], 70)
 
 
