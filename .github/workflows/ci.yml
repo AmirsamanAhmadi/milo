@@ -63,3 +63,14 @@ jobs:
         if: always()
         run: |
           if [ -f compose.yaml ]; then docker compose down; fi
+  ci-gate:
+    name: CI passed
+    needs: tests
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require successful tests
+        env:
+          TEST_RESULT: ${{ needs.tests.result }}
+        run: test "$TEST_RESULT" = success

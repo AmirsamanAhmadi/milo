@@ -51,3 +51,4 @@ jobs:
             if(!pending) params.conclusion=failed?'failure':'success';
             if(previous) await github.rest.checks.update({...params,check_run_id:previous.id});
             else await github.rest.checks.create({...params,head_sha:sha});
+            if(failed) core.setFailed('One or more required workflows failed. See the CI/CD report.');
