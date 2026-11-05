@@ -4,13 +4,16 @@ const {spawn}=require('node:child_process');
 const {createInterface}=require('node:readline');
 const sessions=new Map();
 const modelRequests=new Map();
-function discoverModels(home,spawnProcess=spawn,timeoutMs=30000){
+const modelChildren=new Set();
+function discoverModels(home,spawnProcess=spawn,timeoutMs=30000,signal){
  return new Promise((resolve,reject)=>{
   const child=spawnProcess('codex',['-c','cli_auth_credentials_store="file"','app-server'],{cwd:home,env:{PATH:process.env.PATH,HOME:home,CODEX_HOME:home},stdio:['pipe','pipe','pipe'],windowsHide:true});
+  modelChildren.add(child);child.once('close',()=>modelChildren.delete(child));
   let settled=false,requestId=1,bufferSize=0;
   const models=new Map(),cursors=new Set();
   const lines=createInterface({input:child.stdout});
-  const finish=(error)=>{if(settled)return;settled=true;clearTimeout(timeout);lines.close();child.stdin.end();child.kill();error?reject(Error('Could not load ChatGPT models. Try again or sign in again.')):resolve([...models.values()]);};
+  const finish=(error)=>{if(settled)return;settled=true;clearTimeout(timeout);signal?.removeEventListener('abort',cancel);lines.close();child.stdin.end();child.kill();error?reject(Error('Could not load ChatGPT models. Try again or sign in again.')):resolve([...models.values()]);};
+  const cancel=()=>finish(true);
   const timeout=setTimeout(()=>finish(true),timeoutMs);
   const send=message=>child.stdin.write(JSON.stringify(message)+'\n');
   const list=cursor=>{requestId++;send({id:requestId,method:'model/list',params:{limit:100,includeHidden:false,...(cursor?{cursor}:{})}});};
@@ -29,15 +32,18 @@ function discoverModels(home,spawnProcess=spawn,timeoutMs=30000){
     if(cursor){if(typeof cursor!=='string'||cursors.has(cursor)||cursors.size>=20)return finish(true);cursors.add(cursor);list(cursor);}else finish();
    }catch{finish(true);}
   });
+  signal?.addEventListener('abort',cancel,{once:true});
+  if(signal?.aborted){cancel();return;}
   send({id:1,method:'initialize',params:{clientInfo:{name:'milo',title:'Milo',version:'0.1.0'}}});
  });
 }
 async function listModels(userId){
  if(!status(userId).connected)throw Error('Sign in to ChatGPT first.');
- if(modelRequests.has(userId))return modelRequests.get(userId);
- if(modelRequests.size>=4)throw Error('Model discovery is busy. Try again shortly.');
- const request=discoverModels(accountHome(userId));modelRequests.set(userId,request);
- try{const models=await request;if(modelRequests.get(userId)!==request||!status(userId).connected)throw Error('ChatGPT connection changed. Reload model suggestions.');return models;}
+ if(modelRequests.has(userId))return modelRequests.get(userId).promise;
+ if(modelChildren.size>=4)throw Error('Model discovery is busy. Try again shortly.');
+ const controller=new AbortController(),request={controller};
+ request.promise=discoverModels(accountHome(userId),spawn,30000,controller.signal);modelRequests.set(userId,request);
+ try{const models=await request.promise;if(modelRequests.get(userId)!==request||!status(userId).connected)throw Error('ChatGPT connection changed. Reload model suggestions.');return models;}
  finally{if(modelRequests.get(userId)===request)modelRequests.delete(userId);}
 }
 function accountHome(userId){
@@ -69,7 +75,8 @@ function start(userId){
  return status(userId);
 }
 function disconnect(userId){
- modelRequests.delete(userId);
+ const request=modelRequests.get(userId);
+ request?.controller.abort();modelRequests.delete(userId);
  sessions.get(userId)?.child?.kill();sessions.delete(userId);
  const file=path.join(accountHome(userId),'auth.json');try{fs.unlinkSync(file);}catch(error){if(error.code!=='ENOENT')throw error;}
  return {connected:false,status:'disconnected'};

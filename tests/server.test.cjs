@@ -22,7 +22,7 @@ test('ChatGPT model discovery initializes the member CLI, follows pages and hide
  const models=await discoverModels('/private/member',(command,args,options)=>{
   assert.equal(command,'codex');assert.ok(args.includes('app-server'));
   assert.deepEqual(Object.keys(options.env).sort(),['CODEX_HOME','HOME','PATH']);assert.equal(options.env.CODEX_HOME,'/private/member');assert.equal(options.cwd,'/private/member');
-  child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>{killed=true;};
+  child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>{killed=true;child.emit('close',0);};
   child.stdin=new Writable({write(chunk,encoding,done){
    const request=JSON.parse(chunk);messages.push(request);
    let result;
@@ -40,7 +40,7 @@ test('ChatGPT model discovery cleans up on protocol failure, exit and timeout wi
  for(const mode of ['error','exit','timeout']){
   let killed=false;
   await assert.rejects(discoverModels('/private/member',()=>{
-   const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.kill=()=>{killed=true;};
+   const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.kill=()=>{killed=true;child.emit('close',0);};
    if(mode==='error')queueMicrotask(()=>child.stdout.write(JSON.stringify({id:1,error:{message:'private diagnostic'}})+'\n'));
    if(mode==='exit')queueMicrotask(()=>child.emit('close',1));
    return child;
@@ -85,6 +85,22 @@ test('editable ChatGPT suggestions preserve typed values and ignore outdated pro
  element('#ai-provider').value='ChatGPT';fetchModels=async()=>{throw Error('Lookup failed. Enter a model manually.');};await run('loadAIModels()');
  assert.match(element('#ai-model-help').textContent,/Lookup failed/);assert.equal(element('[data-ai-models-refresh]').disabled,false);assert.equal(element('#ai-model').value,'typed-model');
  fetchModels=async()=>({models:[]});await run('loadAIModels()');assert.match(element('#ai-model-help').textContent,/No model suggestions/);
+});
+test('disconnect cancels discovery and retains process slots until children close',async()=>{
+ const vm=require('node:vm'),{EventEmitter}=require('node:events'),{PassThrough}=require('node:stream');
+ const children=[],module={exports:{}};
+ const spawn=()=>{const child=new EventEmitter();child.stdin=new PassThrough();child.stdout=new PassThrough();child.stderr=new PassThrough();child.killed=false;child.kill=()=>{child.killed=true;};children.push(child);return child;};
+ vm.runInNewContext(fs.readFileSync('src/server/codex-account.cjs','utf8'),{module,require:name=>name==='node:child_process'?{spawn}:name==='node:fs'?{existsSync:()=>true,unlinkSync(){}}:require(name),process,setTimeout,clearTimeout,AbortController});
+ const account=module.exports,id='00000000-0000-0000-0000-000000000000';
+ for(let i=0;i<4;i++){
+  const pending=account.listModels(id);const rejected=assert.rejects(pending,/Could not load/);
+  account.disconnect(id);await rejected;assert.equal(children[i].killed,true);
+ }
+ await assert.rejects(account.listModels(id),/busy/);assert.equal(children.length,4);
+ children[0].emit('close',0);
+ const pending=account.listModels(id),rejected=assert.rejects(pending,/Could not load/);
+ assert.equal(children.length,5);account.disconnect(id);await rejected;
+ for(const child of children.slice(1))child.emit('close',0);
 });
 test('HTTP upstream supports an HTTPS public origin without trusting forwarded headers',async()=>{
  const f=await fixture(),http=require('node:http'),publicURL='https://milo.example.com';
