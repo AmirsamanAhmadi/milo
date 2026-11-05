@@ -17,3 +17,11 @@ The HTTP reverse-proxy change triggered two Snyk Code findings on 12 October 202
 `scripts/check-code-findings.py` reviews the raw SARIF report against `docs/code-scan-exceptions.json`. An exception requires the exact finding identity, rule, path and unchanged source statement at the reported location. Only the two documented HTTP findings are accepted. A changed location, new finding (including another HTTP listener), unknown rule, invalid report or operational scanner error fails CI. Raw findings and the review output remain attached to the run; accepted exceptions appear in its summary. Production still needs HTTPS at its reverse proxy, with the backend kept on loopback or a private network.
 
 The gate has deterministic tests in `tests/test_security_gate.py`. The existing dependency, infrastructure and container gates remain unchanged. See [Snyk SARIF export and exit codes](https://docs.snyk.io/developer-tools/snyk-cli/scan-and-maintain-projects-using-the-cli/snyk-cli-for-snyk-code/view-snyk-code-cli-results).
+
+## Required merge checks
+
+The `main` branch requires a pull request and the GitHub Actions checks `CI passed`, `snyk`, and `terraform`. Checks must pass on a branch up to date with `main`. The rule applies to administrators too; force pushes and branch deletion are disabled. `CI passed` runs even when its test dependency fails or is skipped and succeeds only when the test job succeeded. A workflow file alone cannot enforce merge policy: this is also configured in GitHub branch protection.
+
+Snyk remains a required, failing check when its token is unavailable. Fork pull requests therefore need a maintainer to copy the reviewed changes to a branch in this repository and open a replacement PR so scans can run. Never use `pull_request_target` to execute contributor code with repository secrets. Do not bypass failed or missing scans.
+
+On 5 November 2026 the security scan found 14 pypdf findings in version 6.20.0. The pinned version is now 6.21.4, the scanner's recommended fixed release. The runtime and database images are scanned in separate steps so a runtime scan failure does not prevent the database scan. The report workflow itself now fails when it reports a failed underlying workflow.
